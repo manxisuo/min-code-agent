@@ -1,0 +1,80 @@
+package observability
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"time"
+)
+
+// EventType identifies a structured observation.
+type EventType string
+
+const (
+	EventSessionCreated EventType = "session.created"
+
+	EventAgentStarted  EventType = "agent.started"
+	EventAgentFinished EventType = "agent.finished"
+	EventAgentFailed   EventType = "agent.failed"
+
+	EventLLMRequestStarted  EventType = "llm.request_started"
+	EventLLMRequestFinished EventType = "llm.request_finished"
+	EventLLMRequestFailed   EventType = "llm.request_failed"
+)
+
+// Event is a structured observation record.
+type Event struct {
+	ID        string    `json:"id"`
+	Time      time.Time `json:"time"`
+	SessionID string    `json:"session_id"`
+	Step      int       `json:"step"`
+	Type      EventType `json:"type"`
+	Data      any       `json:"data,omitempty"`
+}
+
+// NewEvent builds an event with a generated id and timestamp.
+func NewEvent(sessionID string, step int, typ EventType, data any) Event {
+	return Event{
+		ID:        NewID(),
+		Time:      time.Now().UTC(),
+		SessionID: sessionID,
+		Step:      step,
+		Type:      typ,
+		Data:      data,
+	}
+}
+
+// NewID returns a random 16-byte hex id.
+func NewID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failure is fatal in practice; fall back to timestamp.
+		return hex.EncodeToString([]byte(time.Now().UTC().Format("20060102150405.000000000")))
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// LLMRequestData is payload for llm.request_* events.
+type LLMRequestData struct {
+	Provider     string `json:"provider"`
+	Model        string `json:"model"`
+	MessageCount int    `json:"message_count"`
+	InputTokens  int    `json:"input_tokens,omitempty"`
+	DurationMS   int64  `json:"duration_ms"`
+	// Output fields on finished events.
+	ContentPreview string `json:"content_preview,omitempty"`
+	OutputTokens   int    `json:"output_tokens,omitempty"`
+	TotalTokens    int    `json:"total_tokens,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
+// AgentLifecycleData is payload for agent.* events.
+type AgentLifecycleData struct {
+	Reason string `json:"reason,omitempty"`
+}
+
+// SessionCreatedData is payload for session.created.
+type SessionCreatedData struct {
+	Workspace string `json:"workspace,omitempty"`
+	Model     string `json:"model,omitempty"`
+	Provider  string `json:"provider,omitempty"`
+}

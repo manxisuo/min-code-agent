@@ -1,0 +1,19 @@
+# Min Code Agent configuration
+# Values can be overridden by environment variables:
+#   MINCODE_PROVIDER_TYPE, MINCODE_BASE_URL, MINCODE_API_KEY / OPENAI_API_KEY,
+#   MINCODE_MODEL / OPENAI_MODEL, MINCODE_TRACE_DIR, MINCODE_MAX_TOKENS
+
+provider:
+  # openai-compatible | fake
+  type: openai-compatible
+  base_url: https://api.openai.com/v1
+  # api_key: prefer env OPENAI_API_KEY or MINCODE_API_KEY
+  model: gpt-4o-mini
+  temperature: 0.7
+  timeout_sec: 120
+
+agent:
+  max_steps: 30
+
+trace:
+  dir: .mincode/traces

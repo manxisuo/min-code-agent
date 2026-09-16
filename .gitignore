@@ -1,0 +1,11 @@
+# Binaries
+/mincode
+/mincode.exe
+
+# Runtime artifacts
+.mincode/
+
+# Go
+*.test
+*.out
+vendor/
