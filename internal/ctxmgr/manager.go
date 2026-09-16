@@ -177,8 +177,14 @@ func (m *Manager) BuildRequest(tools []llm.ToolDefinition) (llm.ChatRequest, Sna
 		src := e.source
 		if e.msg.Role == llm.RoleTool {
 			src = SourceToolResult
-		} else if e.msg.Role == llm.RoleUser && i == len(m.entries)-1 {
-			src = SourceUserInput
+		} else if e.msg.Role == llm.RoleUser {
+			if i == len(m.entries)-1 {
+				src = SourceUserInput
+			} else {
+				src = SourceHistory
+			}
+		} else {
+			src = SourceHistory
 		}
 		parts = append(parts, part{
 			msg:   e.msg,

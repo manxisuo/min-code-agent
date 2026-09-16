@@ -490,20 +490,30 @@ func formatSnapshot(s ctxmgr.Snapshot) string {
 	b.WriteString(padCol("Included", 14) + padCol("", 12) + padCol(fmt.Sprint(s.Included), 8) + "items\n")
 	b.WriteString(padCol(yellow("Excluded"), 14) + padCol("", 12) + padCol(fmt.Sprint(s.Excluded), 8) + "items\n")
 	b.WriteString(padCol(yellow("Truncated"), 14) + padCol("", 12) + padCol(fmt.Sprint(s.Truncated), 8) + "items\n")
-	totalCol := green(fmt.Sprint(s.TotalTokens))
-	if s.TotalTokens > s.Budget*9/10 {
-		totalCol = yellow(fmt.Sprint(s.TotalTokens))
+	if s.ToolTokens > 0 {
+		b.WriteString(padCol(magenta("Tool schemas"), 14) + padCol("", 12) + padCol(magenta(fmt.Sprint(s.ToolTokens)), 8) +
+			gray("tokens (sent every call, not chat messages)") + "\n")
+	}
+	grand := s.TotalTokens + s.ToolTokens
+	totalCol := green(fmt.Sprint(grand))
+	if grand > s.Budget*9/10 {
+		totalCol = yellow(fmt.Sprint(grand))
 	}
 	b.WriteString(padCol(bold("Total"), 14) + padCol("", 12) + padCol(totalCol, 8) +
 		"tokens / budget " + fmt.Sprint(s.Budget) + "\n")
 	if s.ActualPromptTokens > 0 {
-		estTotal := s.TotalTokens + s.ToolTokens
+		estTotal := grand
 		ratio := s.EstimateRatio
 		if ratio <= 0 && estTotal > 0 {
 			ratio = float64(s.ActualPromptTokens) / float64(estTotal)
 		}
+		delta := s.ActualPromptTokens - estTotal
+		sign := "+"
+		if delta < 0 {
+			sign = ""
+		}
 		b.WriteString(padCol(blue("API actual"), 14) + padCol("", 12) + padCol(blue(fmt.Sprint(s.ActualPromptTokens)), 8) +
-			gray(fmt.Sprintf("prompt_tokens  ratio=%.2f", ratio)) + "\n")
+			gray(fmt.Sprintf("prompt_tokens  ratio=%.2f  Δ%s%d", ratio, sign, delta)) + "\n")
 	}
 	return b.String()
 }

@@ -177,6 +177,31 @@ func TestEstimateTokensCJK(t *testing.T) {
 	}
 }
 
+func TestOlderUserMessagesLabelHistory(t *testing.T) {
+	m := New("SYS", "", 32000)
+	m.AppendUser("first question")
+	m.AppendAssistant(llm.Message{Role: llm.RoleAssistant, Content: "first answer"})
+	m.AppendUser("second question")
+
+	_, snap := m.BuildRequest(nil)
+	var users []Item
+	for _, it := range snap.Items {
+		if it.Role == "user" {
+			users = append(users, it)
+		}
+	}
+	if len(users) != 2 {
+		t.Fatalf("user items = %d", len(users))
+	}
+	// Only the newest user turn is user_input; older turns are history.
+	if users[0].Source != SourceHistory {
+		t.Fatalf("older user source = %s, want history", users[0].Source)
+	}
+	if users[1].Source != SourceUserInput {
+		t.Fatalf("newest user source = %s, want user_input", users[1].Source)
+	}
+}
+
 func TestSnapshotSummary(t *testing.T) {
 	m := New("SYS", "", 10000)
 	m.AppendUser("hello")
