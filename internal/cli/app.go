@@ -108,8 +108,11 @@ func NewApp(opts Options) (*App, error) {
 	registry.Register(&tools.ListDir{WS: ws})
 	registry.Register(&tools.Glob{WS: ws})
 	registry.Register(&tools.Grep{WS: ws})
+	registry.Register(&tools.WriteFile{WS: ws})
+	registry.Register(&tools.EditFile{WS: ws})
 
 	ag := agent.New(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, cfg.Agent.SystemPrompt, cfg.Agent.TokenBudget)
+	// Approver wired after App exists so it can print to a.out and read stdin.
 
 	app := &App{
 		cfg:       cfg,
@@ -122,6 +125,7 @@ func NewApp(opts Options) (*App, error) {
 		workspace: workspace,
 		out:       os.Stdout,
 	}
+	ag.Approver = NewStdinApprover(app.out, ws)
 	bus.Subscribe(func(e observability.Event) {
 		if !app.echoTools.Load() {
 			return
@@ -244,9 +248,7 @@ func (a *App) repl(ctx context.Context) error {
 }
 
 func (a *App) toolNames() []string {
-	// Registry is inside agent; expose via a lightweight re-query if needed.
-	// For display we hardcode the Phase 2 set registered in NewApp.
-	return []string{"read_file", "list_dir", "glob", "grep"}
+	return []string{"read_file", "list_dir", "glob", "grep", "write_file", "edit_file"}
 }
 
 // runTurn executes one user turn through the agent and prints tool + final output.
@@ -287,6 +289,19 @@ func echoToolEvent(w io.Writer, e observability.Event) {
 				bold(data.Tool),
 				gray(fmt.Sprintf("%dB %s", data.ResultSize, dur.Round(time.Millisecond))),
 			)
+		}
+	case observability.EventFileChanged:
+		diff := ""
+		switch d := e.Data.(type) {
+		case observability.FileChangedData:
+			diff = d.Diff
+		case map[string]any:
+			diff, _ = d["diff"].(string)
+		}
+		if diff != "" {
+			fmt.Fprintf(w, "\n%s\n", bold("Diff:"))
+			fmt.Fprint(w, colorizeDiff(diff))
+			fmt.Fprintln(w)
 		}
 	}
 }
@@ -640,6 +655,18 @@ func timelineLine(e observability.Event) (string, bool) {
 		data := mapFromAny(e.Data)
 		tool, _ := data["tool"].(string)
 		return fmt.Sprintf("%s  %s %s %v", ts, red("Tool Failed"), bold(tool), data["error"]), true
+	case observability.EventPermissionRequested:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v", ts, yellow("Permission"), data["summary"]), true
+	case observability.EventPermissionApproved:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v", ts, green("Perm OK"), data["summary"]), true
+	case observability.EventPermissionDenied:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v", ts, red("Perm Deny"), data["summary"]), true
+	case observability.EventFileChanged:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v %v", ts, magenta("File Changed"), data["operation"], data["path"]), true
 	case observability.EventLoopDetected:
 		data := mapFromAny(e.Data)
 		return fmt.Sprintf("%s  %s %v x%v", ts, red("Loop Detected"), data["tool"], data["count"]), true
@@ -743,8 +770,16 @@ func paintEventType(typ string) string {
 		return blue(typ)
 	case strings.HasPrefix(typ, "agent.finished"):
 		return green(typ)
-	case strings.HasPrefix(typ, "agent.failed") || strings.HasPrefix(typ, "llm.request_failed") || strings.HasPrefix(typ, "tool.failed") || typ == "loop.detected":
+	case strings.HasPrefix(typ, "agent.failed") || strings.HasPrefix(typ, "llm.request_failed") ||
+		strings.HasPrefix(typ, "tool.failed") || typ == "loop.detected" ||
+		strings.HasPrefix(typ, "permission.denied"):
 		return red(typ)
+	case strings.HasPrefix(typ, "permission.approved"):
+		return green(typ)
+	case strings.HasPrefix(typ, "permission."):
+		return yellow(typ)
+	case strings.HasPrefix(typ, "file."):
+		return magenta(typ)
 	case strings.HasPrefix(typ, "llm."):
 		return magenta(typ)
 	case strings.HasPrefix(typ, "tool."):

@@ -11,6 +11,7 @@ import (
 	"github.com/mincode/mincode/internal/ctxmgr"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
+	"github.com/mincode/mincode/internal/permission"
 	"github.com/mincode/mincode/internal/tools"
 )
 
@@ -46,6 +47,10 @@ type Agent struct {
 	SessionID string
 	MaxSteps  int
 
+	// Policy and Approver gate write/edit tools. Nil policy uses defaults.
+	Policy   permission.Policy
+	Approver permission.Approver
+
 	// Ctx builds budgeted prompts and keeps conversation state.
 	Ctx   *ctxmgr.Manager
 	State State
@@ -62,6 +67,7 @@ func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, ses
 		Bus:       bus,
 		SessionID: sessionID,
 		MaxSteps:  maxSteps,
+		Policy:    permission.NewDefaultPolicy(),
 		Ctx:       ctxmgr.New(systemPrompt, "", tokenBudget),
 		State:     StateIdle,
 	}
@@ -255,6 +261,46 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 		args = "{}"
 	}
 
+	summary := summarizeToolCall(tc.Name, args)
+	req := permission.Request{
+		Tool:      tc.Name,
+		Arguments: args,
+		Summary:   summary,
+	}
+	level := permission.Ask
+	if a.Policy != nil {
+		level = a.Policy.Evaluate(req)
+	}
+	a.emit(observability.EventPermissionRequested, observability.PermissionData{
+		Tool:      tc.Name,
+		Arguments: args,
+		Summary:   summary,
+		Level:     level.String(),
+	})
+
+	denied, perr := permission.Evaluate(a.Policy, a.Approver, req)
+	if denied {
+		reason := "denied"
+		if perr != nil {
+			reason = perr.Error()
+		}
+		a.emit(observability.EventPermissionDenied, observability.PermissionData{
+			Tool:     tc.Name,
+			Summary:  summary,
+			Level:    level.String(),
+			Decision: "denied",
+			Reason:   reason,
+		})
+		msg := "permission denied: " + reason
+		return tools.Result{Content: msg, IsError: true, Meta: map[string]any{"permission": "denied"}}, nil
+	}
+	a.emit(observability.EventPermissionApproved, observability.PermissionData{
+		Tool:     tc.Name,
+		Summary:  summary,
+		Level:    level.String(),
+		Decision: "approved",
+	})
+
 	a.emit(observability.EventToolRequested, observability.ToolEventData{
 		Tool:      tc.Name,
 		Arguments: args,
@@ -278,6 +324,19 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 		return result, err
 	}
 
+	if metaPath, ok := result.Meta["path"].(string); ok && (tc.Name == "write_file" || tc.Name == "edit_file") {
+		if !result.IsError {
+			op, _ := result.Meta["operation"].(string)
+			diff, _ := result.Meta["diff"].(string)
+			a.emit(observability.EventFileChanged, observability.FileChangedData{
+				Path:      metaPath,
+				Operation: op,
+				Bytes:     len(result.Content),
+				Diff:      diff,
+			})
+		}
+	}
+
 	preview := result.Content
 	if len(preview) > toolPreviewLen {
 		preview = truncatePreview(preview, toolPreviewLen)
@@ -295,6 +354,30 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 	}
 	a.emit(observability.EventToolFinished, data)
 	return result, nil
+}
+
+func summarizeToolCall(name, args string) string {
+	var m map[string]any
+	if err := json.Unmarshal([]byte(args), &m); err != nil {
+		return name
+	}
+	path, _ := m["path"].(string)
+	switch name {
+	case "write_file":
+		return fmt.Sprintf("write_file %s", path)
+	case "edit_file":
+		return fmt.Sprintf("edit_file %s", path)
+	case "read_file":
+		return fmt.Sprintf("read_file %s", path)
+	case "shell":
+		cmd, _ := m["command"].(string)
+		return "shell " + cmd
+	default:
+		if path != "" {
+			return name + " " + path
+		}
+		return name
+	}
 }
 
 func (a *Agent) emitLLMStarted(req llm.ChatRequest) {

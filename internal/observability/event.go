@@ -30,6 +30,12 @@ const (
 	EventToolFinished  EventType = "tool.finished"
 	EventToolFailed    EventType = "tool.failed"
 
+	EventPermissionRequested EventType = "permission.requested"
+	EventPermissionApproved  EventType = "permission.approved"
+	EventPermissionDenied    EventType = "permission.denied"
+
+	EventFileChanged EventType = "file.changed"
+
 	EventLoopDetected EventType = "loop.detected"
 )
 
@@ -124,4 +130,22 @@ type LoopDetectedData struct {
 	Tool      string `json:"tool"`
 	Count     int    `json:"count"`
 	Arguments string `json:"arguments,omitempty"`
+}
+
+// PermissionData is payload for permission.* events.
+type PermissionData struct {
+	Tool      string `json:"tool"`
+	Arguments string `json:"arguments,omitempty"`
+	Summary   string `json:"summary,omitempty"`
+	Level     string `json:"level,omitempty"`
+	Decision  string `json:"decision,omitempty"` // approved | denied
+	Reason    string `json:"reason,omitempty"`
+}
+
+// FileChangedData is payload for file.changed.
+type FileChangedData struct {
+	Path      string `json:"path"`
+	Operation string `json:"operation"` // created | overwrote | edit
+	Bytes     int    `json:"bytes,omitempty"`
+	Diff      string `json:"diff,omitempty"`
 }
