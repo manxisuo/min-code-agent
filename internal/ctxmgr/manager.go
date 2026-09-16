@@ -26,6 +26,7 @@ type Manager struct {
 	system       string
 	instructions string
 	budget       int
+	compressAt   int
 	entries      []entry
 	step         int
 	lastSnapshot *Snapshot
@@ -41,6 +42,7 @@ func New(systemPrompt, instructions string, budget int) *Manager {
 		system:       systemPrompt,
 		instructions: instructions,
 		budget:       budget,
+		compressAt:   DefaultCompressAtTokens,
 		cal:          NewCalibrator(),
 	}
 }

@@ -104,6 +104,13 @@ func normalize(cfg *Config) {
 	if cfg.Agent.TokenBudget <= 0 {
 		cfg.Agent.TokenBudget = 32000
 	}
+	// compress_at: 0 → default; negative → disabled.
+	if cfg.Agent.CompressAt == 0 {
+		cfg.Agent.CompressAt = 18000
+	}
+	if cfg.Agent.CompressAt < 0 {
+		cfg.Agent.CompressAt = 0
+	}
 	if cfg.Agent.SystemPrompt == "" {
 		cfg.Agent.SystemPrompt = DefaultSystemPrompt
 	}

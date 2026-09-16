@@ -118,7 +118,7 @@ func NewApp(opts Options) (*App, error) {
 	registry.Register(&tools.Shell{WS: ws})
 
 	sysPrompt := cfg.Agent.SystemPrompt + config.PlatformShellHint(runtime.GOOS)
-	ag := agent.New(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, sysPrompt, cfg.Agent.TokenBudget)
+	ag := agent.NewWithCompress(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, sysPrompt, cfg.Agent.TokenBudget, cfg.Agent.CompressAt)
 
 	sessions := session.NewStore(session.DefaultDir(workspace))
 
@@ -634,6 +634,8 @@ func paintSource(src string) string {
 		return cyan(src)
 	case "tool_result":
 		return blue(src)
+	case "summary":
+		return yellow(src)
 	case "pinned":
 		return yellow(src)
 	default:
@@ -708,6 +710,11 @@ func timelineLine(e observability.Event) (string, bool) {
 		return fmt.Sprintf("%s  %s msgs=%s %s tools=%v excl=%v trunc=%v",
 			ts, cyan("Context Built"), est, gray("budget="+fmt.Sprint(data["budget"])),
 			toolsTok, data["excluded_count"], data["truncated_count"]), true
+	case observability.EventContextCompacted:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v→%v tokens  compressed=%v preserved=%v",
+			ts, yellow("Compacted"), data["before_tokens"], data["after_tokens"],
+			data["compressed"], data["preserved"]), true
 	case observability.EventLLMRequestFinished:
 		data := mapFromAny(e.Data)
 		preview, _ := data["content_preview"].(string)

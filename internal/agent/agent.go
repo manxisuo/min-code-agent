@@ -58,9 +58,16 @@ type Agent struct {
 
 // New creates an agent with a context manager.
 func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, sessionID string, maxSteps int, systemPrompt string, tokenBudget int) *Agent {
+	return NewWithCompress(provider, reg, bus, sessionID, maxSteps, systemPrompt, tokenBudget, ctxmgr.DefaultCompressAtTokens)
+}
+
+// NewWithCompress is New with an explicit compaction threshold.
+func NewWithCompress(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, sessionID string, maxSteps int, systemPrompt string, tokenBudget, compressAt int) *Agent {
 	if maxSteps <= 0 {
 		maxSteps = defaultMaxSteps
 	}
+	mgr := ctxmgr.New(systemPrompt, "", tokenBudget)
+	mgr.SetCompressAt(compressAt)
 	return &Agent{
 		Provider:  provider,
 		Tools:     reg,
@@ -68,7 +75,7 @@ func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, ses
 		SessionID: sessionID,
 		MaxSteps:  maxSteps,
 		Policy:    &permission.ShellAwarePolicy{Inner: permission.NewDefaultPolicy()},
-		Ctx:       ctxmgr.New(systemPrompt, "", tokenBudget),
+		Ctx:       mgr,
 		State:     StateIdle,
 	}
 }
@@ -132,6 +139,24 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 			Step:   step + 1,
 			Budget: a.Ctx.Budget(),
 		})
+
+		if cr := a.Ctx.CompactIfNeed(); cr != nil {
+			a.emit(observability.EventContextCompactionStart, observability.CompactionData{
+				BeforeTokens: cr.BeforeTokens,
+			})
+			preview := cr.Summary
+			if len(preview) > 300 {
+				preview = truncatePreview(preview, 300)
+			}
+			a.emit(observability.EventContextCompacted, observability.CompactionData{
+				BeforeTokens:   cr.BeforeTokens,
+				AfterTokens:    cr.AfterTokens,
+				Compressed:     cr.Compressed,
+				Preserved:      cr.Preserved,
+				Pinned:         cr.Pinned,
+				SummaryPreview: preview,
+			})
+		}
 
 		defs := a.toolDefinitions()
 		req, snap := a.Ctx.BuildRequest(defs)

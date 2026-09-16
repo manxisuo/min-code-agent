@@ -16,8 +16,10 @@ const (
 	EventAgentFinished EventType = "agent.finished"
 	EventAgentFailed   EventType = "agent.failed"
 
-	EventContextBuildStarted EventType = "context.build_started"
-	EventContextBuilt        EventType = "context.built"
+	EventContextBuildStarted    EventType = "context.build_started"
+	EventContextBuilt           EventType = "context.built"
+	EventContextCompactionStart EventType = "context.compaction_started"
+	EventContextCompacted       EventType = "context.compacted"
 
 	EventLLMRequestStarted  EventType = "llm.request_started"
 	EventLLMRequestFinished EventType = "llm.request_finished"
@@ -112,6 +114,17 @@ type ContextBuiltData struct {
 	Included    int `json:"included_count"`
 	Excluded    int `json:"excluded_count"`
 	Truncated   int `json:"truncated_count"`
+}
+
+// CompactionData is payload for context.compaction_*.
+type CompactionData struct {
+	BeforeTokens   int    `json:"before_tokens"`
+	AfterTokens    int    `json:"after_tokens"`
+	Dropped        int    `json:"dropped"`
+	Compressed     int    `json:"compressed"`
+	Preserved      int    `json:"preserved"`
+	Pinned         int    `json:"pinned"`
+	SummaryPreview string `json:"summary_preview,omitempty"`
 }
 
 // ToolEventData is payload for tool.* events.

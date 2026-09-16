@@ -25,6 +25,8 @@ type AgentConfig struct {
 	SystemPrompt string `yaml:"system_prompt"`
 	// TokenBudget caps estimated prompt tokens per LLM call (0 = default 32000).
 	TokenBudget int `yaml:"token_budget"`
+	// CompressAt triggers history compaction when estimated history tokens exceed this (0 disables).
+	CompressAt int `yaml:"compress_at"`
 }
 
 // TraceConfig controls where JSONL traces are written.
@@ -46,6 +48,7 @@ func Default() Config {
 			MaxSteps:     30,
 			SystemPrompt: DefaultSystemPrompt,
 			TokenBudget:  32000,
+			CompressAt:   18000,
 		},
 		Trace: TraceConfig{
 			Dir: ".mincode/traces",

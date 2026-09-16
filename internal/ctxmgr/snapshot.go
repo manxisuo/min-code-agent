@@ -18,6 +18,7 @@ const (
 	SourceToolResult   Source = "tool_result"
 	SourceUserInput    Source = "user_input"
 	SourcePinned       Source = "pinned"
+	SourceSummary      Source = "summary"
 )
 
 // Item is one context piece with provenance and budget outcome.
