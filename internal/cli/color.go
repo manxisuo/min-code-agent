@@ -25,7 +25,7 @@ func colorEnabled() bool {
 	if os.Getenv("NO_COLOR") != "" {
 		return false
 	}
-	if os.Getenv("MINICODE_COLOR") == "0" {
+	if os.Getenv("MINCODE_COLOR") == "0" {
 		return false
 	}
 	return true

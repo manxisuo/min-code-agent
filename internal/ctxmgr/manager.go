@@ -125,6 +125,42 @@ func (m *Manager) AppendToolResult(toolCallID, content string) {
 	})
 }
 
+// ExportedEntry is a serializable conversation entry.
+type ExportedEntry struct {
+	Msg    llm.Message `json:"msg"`
+	Source string      `json:"source"`
+	Tokens int         `json:"tokens"`
+}
+
+// ExportEntries returns a copy of conversation state for persistence.
+func (m *Manager) ExportEntries() []ExportedEntry {
+	out := make([]ExportedEntry, 0, len(m.entries))
+	for _, e := range m.entries {
+		out = append(out, ExportedEntry{
+			Msg:    e.msg,
+			Source: string(e.source),
+			Tokens: e.tokens,
+		})
+	}
+	return out
+}
+
+// RestoreEntries replaces conversation entries (used by --continue).
+func (m *Manager) RestoreEntries(in []ExportedEntry) {
+	m.entries = nil
+	for _, e := range in {
+		src := Source(e.Source)
+		if src == "" {
+			src = SourceHistory
+		}
+		m.entries = append(m.entries, entry{
+			msg:    e.Msg,
+			source: src,
+			tokens: e.Tokens,
+		})
+	}
+}
+
 // Clear drops conversation entries (keeps system/instructions).
 func (m *Manager) Clear() { m.entries = nil }
 

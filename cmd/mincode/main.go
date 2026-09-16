@@ -1,6 +1,6 @@
 // mincode is a learning-oriented Code Agent runtime.
 //
-// Phase 0+1: CLI REPL, OpenAI-compatible / Fake provider, Event Bus, JSONL trace.
+// Phase 0–6: CLI REPL, providers, tools, context inspector, session, replay.
 package main
 
 import (
@@ -22,12 +22,17 @@ func main() {
 	flag.StringVar(&opts.Model, "model", "", "override model name")
 	flag.StringVar(&opts.Provider, "provider", "", "override provider type (openai-compatible|fake)")
 	flag.StringVar(&opts.Workspace, "workspace", "", "workspace directory (default: cwd)")
+	flag.BoolVar(&opts.Continue, "continue", false, "restore the latest session for this workspace")
+	flag.BoolVar(&opts.Continue, "c", false, "alias for --continue")
+	flag.StringVar(&opts.Replay, "replay", "", "replay a session id or trace .jsonl path")
 	flag.Usage = func() {
 		fmt.Fprintf(flag.CommandLine.Output(), `Min Code Agent — learning-oriented Code Agent runtime
 
 Usage:
   mincode [flags]
   mincode <workspace-dir> [flags]
+  mincode replay <session-id>
+  mincode --replay <session-id|.jsonl>
 
 Flags:
 `)
@@ -36,12 +41,16 @@ Flags:
 Examples:
   mincode
   mincode D:\\Code\\myproject
+  mincode --continue
   mincode -p "hello"
+  mincode --replay 20260916-161234-d6b990c3
   mincode --provider fake -p "offline demo"
-  mincode --config ./mincode.yaml
 
 Config resolution (when -config is omitted):
   <workspace>/mincode.yaml → <workspace>/mincode.yml → ./mincode.yaml
+
+Sessions:
+  Saved to <workspace>/.mincode/sessions/<id>.json after each turn
 
 REPL commands:
   /help  /timeline  /context  /trace [n]  /metrics  /clear  /exit
@@ -49,9 +58,17 @@ REPL commands:
 	}
 	flag.Parse()
 
-	// Positional arg: mincode <workspace-dir>
-	if opts.Workspace == "" && flag.NArg() > 0 {
-		opts.Workspace = flag.Arg(0)
+	// Positional: mincode <workspace>  OR  mincode replay <session-id>
+	if flag.NArg() > 0 {
+		if flag.Arg(0) == "replay" {
+			if flag.NArg() < 2 {
+				fmt.Fprintln(os.Stderr, "usage: mincode replay <session-id>")
+				os.Exit(2)
+			}
+			opts.Replay = flag.Arg(1)
+		} else if opts.Workspace == "" {
+			opts.Workspace = flag.Arg(0)
+		}
 	}
 
 	app, err := cli.NewApp(opts)

@@ -22,6 +22,7 @@ import (
 	"github.com/mincode/mincode/internal/ctxmgr"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
+	"github.com/mincode/mincode/internal/session"
 	"github.com/mincode/mincode/internal/tools"
 )
 
@@ -32,6 +33,8 @@ type Options struct {
 	Model      string // override
 	Provider   string // override
 	Workspace  string
+	Continue   bool   // restore latest session for workspace
+	Replay     string // session id or trace path; non-empty runs replay mode
 }
 
 // App wires config, provider, agent, observability and the REPL.
@@ -42,6 +45,7 @@ type App struct {
 	bus       *observability.Bus
 	recorder  *observability.Recorder
 	metrics   *observability.MetricsCollector
+	sessions  *session.Store
 	sessionID string
 	workspace string
 	out       io.Writer
@@ -115,7 +119,8 @@ func NewApp(opts Options) (*App, error) {
 
 	sysPrompt := cfg.Agent.SystemPrompt + config.PlatformShellHint(runtime.GOOS)
 	ag := agent.New(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, sysPrompt, cfg.Agent.TokenBudget)
-	// Approver wired after App exists so it can print to a.out and read stdin.
+
+	sessions := session.NewStore(session.DefaultDir(workspace))
 
 	app := &App{
 		cfg:       cfg,
@@ -124,10 +129,18 @@ func NewApp(opts Options) (*App, error) {
 		bus:       bus,
 		recorder:  recorder,
 		metrics:   metrics,
+		sessions:  sessions,
 		sessionID: sessionID,
 		workspace: workspace,
 		out:       os.Stdout,
 	}
+
+	if opts.Continue {
+		if err := app.restoreLatestSession(); err != nil {
+			fmt.Fprintf(os.Stderr, "mincode: continue: %v\n", err)
+		}
+	}
+
 	ag.Approver = NewStdinApprover(app.out, ws)
 	bus.Subscribe(func(e observability.Event) {
 		if !app.echoTools.Load() {
@@ -182,20 +195,89 @@ func (a *App) emit(typ observability.EventType, data any) {
 	a.bus.Publish(observability.NewEvent(a.sessionID, 0, typ, data))
 }
 
-// Run starts the app: single-shot if opts.Prompt is set, else REPL.
+// Run starts the app: replay / single-shot / continue+REPL / REPL.
 func (a *App) Run(ctx context.Context, opts Options) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	if opts.Replay != "" {
+		return a.runReplay(opts.Replay)
+	}
 	if opts.Prompt != "" {
 		return a.singleShot(ctx, opts.Prompt)
 	}
 	return a.repl(ctx)
 }
 
+func (a *App) restoreLatestSession() error {
+	rec, err := a.sessions.Latest(a.workspace)
+	if err != nil {
+		return err
+	}
+	entries := make([]ctxmgr.ExportedEntry, 0, len(rec.Entries))
+	for _, e := range rec.Entries {
+		entries = append(entries, ctxmgr.ExportedEntry{
+			Msg: llm.Message{
+				Role:       llm.Role(e.Role),
+				Content:    e.Content,
+				ToolCalls:  e.ToolCalls,
+				ToolCallID: e.ToolCallID,
+			},
+			Source: e.Source,
+			Tokens: e.Tokens,
+		})
+	}
+	a.agent.Ctx.RestoreEntries(entries)
+	fmt.Fprintf(a.out, "%s session %s  (%d messages, updated %s)\n",
+		green("restored"), rec.ID, len(entries),
+		rec.UpdatedAt.Local().Format("2006-01-02 15:04"))
+	return nil
+}
+
+func (a *App) saveSession() {
+	if a.sessions == nil {
+		return
+	}
+	entries := a.agent.Ctx.ExportEntries()
+	rec := &session.Record{
+		ID:           a.sessionID,
+		Workspace:    a.workspace,
+		Provider:     a.provider.Name(),
+		Model:        a.provider.Model(),
+		SystemPrompt: a.agent.Ctx.System(),
+		CreatedAt:    time.Now().UTC(),
+		Entries:      make([]session.Entry, 0, len(entries)),
+	}
+	for _, e := range entries {
+		rec.Entries = append(rec.Entries, session.Entry{
+			Role:       string(e.Msg.Role),
+			Content:    e.Msg.Content,
+			ToolCalls:  e.Msg.ToolCalls,
+			ToolCallID: e.Msg.ToolCallID,
+			Source:     e.Source,
+			Tokens:     e.Tokens,
+		})
+	}
+	rec.Turns = countUserTurns(rec.Entries)
+	if err := a.sessions.Save(rec); err != nil {
+		fmt.Fprintf(a.out, "%s save session: %v\n", yellow("warn"), err)
+	}
+}
+
+func countUserTurns(entries []session.Entry) int {
+	n := 0
+	for _, e := range entries {
+		if e.Role == "user" {
+			n++
+		}
+	}
+	return n
+}
+
 func (a *App) singleShot(ctx context.Context, prompt string) error {
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "single-shot"})
 	res, err := a.agent.Run(ctx, prompt)
+	a.saveSession()
 	if err != nil {
 		a.emit(observability.EventAgentFailed, observability.AgentLifecycleData{Reason: err.Error()})
 		return err
@@ -241,6 +323,7 @@ func (a *App) repl(ctx context.Context) error {
 		if err := a.runTurn(ctx, line); err != nil {
 			fmt.Fprintf(a.out, "error: %v\n", err)
 		}
+		a.saveSession()
 	}
 
 	if err := in.Err(); err != nil {
