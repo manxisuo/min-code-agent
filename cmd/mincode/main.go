@@ -37,7 +37,7 @@ Examples:
   mincode --config ./mincode.yaml
 
 REPL commands:
-  /help  /trace [n]  /metrics  /clear  /exit
+  /help  /timeline  /trace [n]  /metrics  /clear  /exit
 `)
 	}
 	flag.Parse()

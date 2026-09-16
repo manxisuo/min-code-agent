@@ -19,6 +19,15 @@ const (
 	EventLLMRequestStarted  EventType = "llm.request_started"
 	EventLLMRequestFinished EventType = "llm.request_finished"
 	EventLLMRequestFailed   EventType = "llm.request_failed"
+
+	EventAgentStateChanged EventType = "agent.state_changed"
+
+	EventToolRequested EventType = "tool.requested"
+	EventToolStarted   EventType = "tool.started"
+	EventToolFinished  EventType = "tool.finished"
+	EventToolFailed    EventType = "tool.failed"
+
+	EventLoopDetected EventType = "loop.detected"
 )
 
 // Event is a structured observation record.
@@ -77,4 +86,28 @@ type SessionCreatedData struct {
 	Workspace string `json:"workspace,omitempty"`
 	Model     string `json:"model,omitempty"`
 	Provider  string `json:"provider,omitempty"`
+}
+
+// StateChangedData is payload for agent.state_changed.
+type StateChangedData struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// ToolEventData is payload for tool.* events.
+type ToolEventData struct {
+	Tool          string `json:"tool"`
+	Arguments     string `json:"arguments,omitempty"`
+	DurationMS    int64  `json:"duration_ms,omitempty"`
+	ResultSize    int    `json:"result_size,omitempty"`
+	IsError       bool   `json:"is_error,omitempty"`
+	Error         string `json:"error,omitempty"`
+	OutputPreview string `json:"output_preview,omitempty"`
+}
+
+// LoopDetectedData is payload for loop.detected.
+type LoopDetectedData struct {
+	Tool      string `json:"tool"`
+	Count     int    `json:"count"`
+	Arguments string `json:"arguments,omitempty"`
 }

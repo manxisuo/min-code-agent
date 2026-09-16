@@ -2,19 +2,23 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/mincode/mincode/internal/agent"
 	"github.com/mincode/mincode/internal/config"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
+	"github.com/mincode/mincode/internal/tools"
 )
 
 // Options are runtime options from flags.
@@ -26,18 +30,18 @@ type Options struct {
 	Workspace  string
 }
 
-// App wires config, provider, observability and the REPL.
+// App wires config, provider, agent, observability and the REPL.
 type App struct {
 	cfg       config.Config
 	provider  llm.Provider
+	agent     *agent.Agent
 	bus       *observability.Bus
 	recorder  *observability.Recorder
 	metrics   *observability.MetricsCollector
 	sessionID string
 	workspace string
-	// history is the in-memory conversation for Phase 1 (no Context Manager yet).
-	history []llm.Message
-	out     io.Writer
+	out       io.Writer
+	echoTools atomic.Bool
 }
 
 // NewApp constructs the application from options.
@@ -85,19 +89,36 @@ func NewApp(opts Options) (*App, error) {
 	})
 	bus.Subscribe(metrics.Handle)
 
+	ws, err := tools.NewWorkspace(workspace)
+	if err != nil {
+		_ = recorder.Close()
+		return nil, err
+	}
+	registry := tools.NewRegistry()
+	registry.Register(&tools.ReadFile{WS: ws})
+	registry.Register(&tools.ListDir{WS: ws})
+	registry.Register(&tools.Glob{WS: ws})
+	registry.Register(&tools.Grep{WS: ws})
+
+	ag := agent.New(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, cfg.Agent.SystemPrompt)
+
 	app := &App{
 		cfg:       cfg,
 		provider:  provider,
+		agent:     ag,
 		bus:       bus,
 		recorder:  recorder,
 		metrics:   metrics,
 		sessionID: sessionID,
 		workspace: workspace,
 		out:       os.Stdout,
-		history: []llm.Message{
-			{Role: llm.RoleSystem, Content: cfg.Agent.SystemPrompt},
-		},
 	}
+	bus.Subscribe(func(e observability.Event) {
+		if !app.echoTools.Load() {
+			return
+		}
+		echoToolEvent(app.out, e)
+	})
 
 	app.emit(observability.EventSessionCreated, observability.SessionCreatedData{
 		Workspace: workspace,
@@ -111,7 +132,7 @@ func buildProvider(cfg config.Config) (llm.Provider, error) {
 	switch cfg.Provider.Type {
 	case "fake":
 		return llm.NewFakeProvider(cfg.Provider.Model,
-			"This is a scripted Fake Provider response (Phase 1 offline mode).",
+			"This is a scripted Fake Provider response (offline mode).",
 		), nil
 	case "openai-compatible", "openai", "":
 		return llm.NewCompatibleProvider(
@@ -142,7 +163,7 @@ func (a *App) SessionID() string { return a.sessionID }
 func (a *App) TracePath() string { return a.recorder.Path() }
 
 func (a *App) emit(typ observability.EventType, data any) {
-	a.bus.Publish(observability.NewEvent(a.sessionID, len(a.history), typ, data))
+	a.bus.Publish(observability.NewEvent(a.sessionID, 0, typ, data))
 }
 
 // Run starts the app: single-shot if opts.Prompt is set, else REPL.
@@ -158,25 +179,30 @@ func (a *App) Run(ctx context.Context, opts Options) error {
 
 func (a *App) singleShot(ctx context.Context, prompt string) error {
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "single-shot"})
-	resp, err := a.chat(ctx, prompt)
+	res, err := a.agent.Run(ctx, prompt)
 	if err != nil {
 		a.emit(observability.EventAgentFailed, observability.AgentLifecycleData{Reason: err.Error()})
 		return err
 	}
-	fmt.Fprintln(a.out, resp.Content)
-	a.emit(observability.EventAgentFinished, observability.AgentLifecycleData{Reason: "single-shot complete"})
+	if res.Final != "" {
+		fmt.Fprintln(a.out, res.Final)
+	}
+	a.emit(observability.EventAgentFinished, observability.AgentLifecycleData{
+		Reason: fmt.Sprintf("single-shot complete steps=%d tools=%d", res.Steps, res.ToolCalls),
+	})
 	return nil
 }
 
 func (a *App) repl(ctx context.Context) error {
 	fmt.Fprintf(a.out, "Min Code Agent  session=%s\n", a.sessionID)
-	fmt.Fprintf(a.out, "provider=%s  model=%s  trace=%s\n", a.provider.Name(), a.provider.Model(), a.recorder.Path())
+	fmt.Fprintf(a.out, "provider=%s  model=%s  workspace=%s\n", a.provider.Name(), a.provider.Model(), a.workspace)
+	fmt.Fprintf(a.out, "tools=%s\n", strings.Join(a.toolNames(), ", "))
+	fmt.Fprintf(a.out, "trace=%s\n", a.recorder.Path())
 	fmt.Fprintf(a.out, "Type a message, or /help for commands.\n\n")
 
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "repl"})
 
 	in := bufio.NewScanner(os.Stdin)
-	// Allow long pasted prompts.
 	in.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	for {
@@ -196,14 +222,9 @@ func (a *App) repl(ctx context.Context) error {
 			continue
 		}
 
-		resp, err := a.chat(ctx, line)
-		if err != nil {
+		if err := a.runTurn(ctx, line); err != nil {
 			fmt.Fprintf(a.out, "error: %v\n", err)
-			continue
 		}
-		fmt.Fprintln(a.out)
-		fmt.Fprintln(a.out, resp.Content)
-		fmt.Fprintln(a.out)
 	}
 
 	if err := in.Err(); err != nil {
@@ -213,76 +234,125 @@ func (a *App) repl(ctx context.Context) error {
 	return nil
 }
 
-// chat sends one user turn through the provider and records traces/metrics.
-func (a *App) chat(ctx context.Context, userText string) (*llm.ChatResponse, error) {
-	a.history = append(a.history, llm.Message{Role: llm.RoleUser, Content: userText})
+func (a *App) toolNames() []string {
+	// Registry is inside agent; expose via a lightweight re-query if needed.
+	// For display we hardcode the Phase 2 set registered in NewApp.
+	return []string{"read_file", "list_dir", "glob", "grep"}
+}
 
-	start := time.Now()
-	a.emit(observability.EventLLMRequestStarted, observability.LLMRequestData{
-		Provider:     a.provider.Name(),
-		Model:        a.provider.Model(),
-		MessageCount: len(a.history),
-	})
+// runTurn executes one user turn through the agent and prints tool + final output.
+func (a *App) runTurn(ctx context.Context, userText string) error {
+	a.echoTools.Store(true)
+	defer a.echoTools.Store(false)
 
-	resp, err := a.provider.Chat(ctx, llm.ChatRequest{
-		Messages: a.history,
-	})
-	elapsed := time.Since(start)
-
+	res, err := a.agent.Run(ctx, userText)
 	if err != nil {
-		a.emit(observability.EventLLMRequestFailed, observability.LLMRequestData{
-			Provider:   a.provider.Name(),
-			Model:      a.provider.Model(),
-			DurationMS: elapsed.Milliseconds(),
-			Error:      err.Error(),
-		})
-		// Drop the failed user message so a retry does not duplicate it.
-		a.history = a.history[:len(a.history)-1]
-		return nil, err
+		return err
 	}
-
-	preview := resp.Content
-	if len(preview) > 200 {
-		preview = preview[:200] + "..."
+	if res.Final != "" {
+		fmt.Fprintln(a.out)
+		fmt.Fprintln(a.out, res.Final)
+		fmt.Fprintln(a.out)
+	} else {
+		fmt.Fprintln(a.out)
 	}
-	a.emit(observability.EventLLMRequestFinished, observability.LLMRequestData{
-		Provider:       a.provider.Name(),
-		Model:          a.provider.Model(),
-		MessageCount:   len(a.history),
-		InputTokens:    resp.Usage.PromptTokens,
-		OutputTokens:   resp.Usage.CompletionTokens,
-		TotalTokens:    resp.Usage.TotalTokens,
-		DurationMS:     elapsed.Milliseconds(),
-		ContentPreview: preview,
-	})
+	return nil
+}
 
-	a.history = append(a.history, llm.Message{
-		Role:      llm.RoleAssistant,
-		Content:   resp.Content,
-		ToolCalls: resp.ToolCalls,
-	})
-	return resp, nil
+func echoToolEvent(w io.Writer, e observability.Event) {
+	switch e.Type {
+	case observability.EventToolStarted:
+		if data, ok := toolData(e.Data); ok {
+			fmt.Fprintf(w, "  → %s %s\n", data.Tool, compactJSON(data.Arguments))
+		}
+	case observability.EventToolFinished, observability.EventToolFailed:
+		if data, ok := toolData(e.Data); ok {
+			status := "ok"
+			if data.IsError || e.Type == observability.EventToolFailed {
+				status = "error"
+			}
+			dur := time.Duration(data.DurationMS) * time.Millisecond
+			fmt.Fprintf(w, "  ← %s %s  %d bytes  %s\n", data.Tool, status, data.ResultSize, dur.Round(time.Millisecond))
+		}
+	}
+}
+
+func toolData(v any) (observability.ToolEventData, bool) {
+	switch d := v.(type) {
+	case observability.ToolEventData:
+		return d, true
+	case map[string]any:
+		out := observability.ToolEventData{}
+		if s, ok := d["tool"].(string); ok {
+			out.Tool = s
+		}
+		if s, ok := d["arguments"].(string); ok {
+			out.Arguments = s
+		}
+		if s, ok := d["error"].(string); ok {
+			out.Error = s
+		}
+		if b, ok := d["is_error"].(bool); ok {
+			out.IsError = b
+		}
+		out.ResultSize = intFromAny(d["result_size"])
+		out.DurationMS = int64(intFromAny(d["duration_ms"]))
+		return out, true
+	}
+	return observability.ToolEventData{}, false
+}
+
+func intFromAny(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	}
+	return 0
+}
+
+func compactJSON(s string) string {
+	if len(s) > 120 {
+		return s[:120] + "..."
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, []byte(s), "", " "); err != nil {
+		if len(s) > 120 {
+			return s[:120] + "..."
+		}
+		return s
+	}
+	out := strings.ReplaceAll(buf.String(), "\n", " ")
+	if len(out) > 120 {
+		return out[:120] + "..."
+	}
+	return out
 }
 
 func (a *App) handleCommand(line string) (quit bool) {
-	cmd := strings.TrimSpace(line)
-	fields := strings.Fields(cmd)
+	fields := strings.Fields(strings.TrimSpace(line))
 	name := fields[0]
 
 	switch name {
 	case "/help", "/h", "/?":
 		fmt.Fprint(a.out, `Commands:
   /help              show this help
-  /trace [n]         show last n trace events (default 20)
+  /timeline          show agent execution timeline
+  /trace [n]         show last n raw trace events (default 30)
   /metrics           show session token/time metrics
-  /clear             clear in-memory conversation history
+  /clear             clear conversation history
   /exit, /quit       leave the REPL
 
 Trace file:
 `)
 		fmt.Fprintf(a.out, "  %s\n", a.recorder.Path())
+	case "/timeline":
+		a.printTimeline()
 	case "/trace":
-		n := 20
+		n := 30
 		if len(fields) > 1 {
 			if v, err := atoi(fields[1]); err == nil && v > 0 {
 				n = v
@@ -294,7 +364,7 @@ Trace file:
 		fmt.Fprint(a.out, a.metrics.Snapshot().Format())
 		fmt.Fprintln(a.out)
 	case "/clear":
-		a.history = a.history[:1] // keep system prompt
+		a.agent.ClearConversation()
 		fmt.Fprintln(a.out, "history cleared (system prompt kept)")
 	case "/exit", "/quit":
 		return true
@@ -302,6 +372,95 @@ Trace file:
 		fmt.Fprintf(a.out, "unknown command %s (try /help)\n", name)
 	}
 	return false
+}
+
+func (a *App) printTimeline() {
+	events, err := observability.ReadEvents(a.recorder.Path())
+	if err != nil {
+		fmt.Fprintf(a.out, "read trace: %v\n", err)
+		return
+	}
+	fmt.Fprintf(a.out, "\nTimeline  %s\n\n", a.recorder.Path())
+	seq := 0
+	for _, e := range events {
+		// Skip pure state chatter noise? Keep state but compact.
+		line, ok := timelineLine(e)
+		if !ok {
+			continue
+		}
+		seq++
+		fmt.Fprintf(a.out, "%3d  %s\n", seq, line)
+	}
+	fmt.Fprintln(a.out)
+}
+
+func timelineLine(e observability.Event) (string, bool) {
+	ts := e.Time.Format("15:04:05.000")
+	switch e.Type {
+	case observability.EventSessionCreated:
+		return fmt.Sprintf("%s  Session Created", ts), true
+	case observability.EventAgentStarted:
+		return fmt.Sprintf("%s  Agent Started", ts), true
+	case observability.EventAgentFinished:
+		return fmt.Sprintf("%s  Agent Finished", ts), true
+	case observability.EventAgentFailed:
+		return fmt.Sprintf("%s  Agent Failed", ts), true
+	case observability.EventAgentStateChanged:
+		data := mapFromAny(e.Data)
+		to, _ := data["to"].(string)
+		// Only surface meaningful operational states.
+		switch to {
+		case "BUILDING_CONTEXT", "CALLING_LLM", "PROCESSING_RESPONSE", "EXECUTING_TOOL",
+			"FINISHED", "FAILED", "CANCELLED", "MAX_STEPS_REACHED":
+			return fmt.Sprintf("%s  State → %s", ts, to), true
+		}
+		return "", false
+	case observability.EventLLMRequestStarted:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  LLM Request   model=%v messages=%v", ts, data["model"], data["message_count"]), true
+	case observability.EventLLMRequestFinished:
+		data := mapFromAny(e.Data)
+		preview, _ := data["content_preview"].(string)
+		if len(preview) > 60 {
+			preview = preview[:60] + "..."
+		}
+		return fmt.Sprintf("%s  LLM Response  in=%v out=%v  %vms  %s",
+			ts, data["input_tokens"], data["output_tokens"], data["duration_ms"], preview), true
+	case observability.EventLLMRequestFailed:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  LLM Failed    %v", ts, data["error"]), true
+	case observability.EventToolStarted:
+		data := mapFromAny(e.Data)
+		tool, _ := data["tool"].(string)
+		args, _ := data["arguments"].(string)
+		return fmt.Sprintf("%s  Tool Start    %s %s", ts, tool, truncateStr(compactJSON(args), 50)), true
+	case observability.EventToolFinished:
+		data := mapFromAny(e.Data)
+		tool, _ := data["tool"].(string)
+		return fmt.Sprintf("%s  Tool Done     %s  %v bytes  %vms", ts, tool, data["result_size"], data["duration_ms"]), true
+	case observability.EventToolFailed:
+		data := mapFromAny(e.Data)
+		tool, _ := data["tool"].(string)
+		return fmt.Sprintf("%s  Tool Failed   %s  %v", ts, tool, data["error"]), true
+	case observability.EventLoopDetected:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  Loop Detected %v x%v", ts, data["tool"], data["count"]), true
+	}
+	return "", false
+}
+
+func mapFromAny(v any) map[string]any {
+	if m, ok := v.(map[string]any); ok {
+		return m
+	}
+	return map[string]any{}
+}
+
+func truncateStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func (a *App) printTrace(n int) {
@@ -317,8 +476,7 @@ func (a *App) printTrace(n int) {
 	}
 	for i, e := range events[start:] {
 		seq := start + i + 1
-		line := formatEvent(e)
-		fmt.Fprintf(a.out, "%3d  %s\n", seq, line)
+		fmt.Fprintf(a.out, "%3d  %s\n", seq, formatEvent(e))
 	}
 	fmt.Fprintln(a.out)
 }
@@ -327,14 +485,10 @@ func formatEvent(e observability.Event) string {
 	ts := e.Time.Format("15:04:05.000")
 	base := fmt.Sprintf("%s  %-22s", ts, e.Type)
 
-	data, ok := e.Data.(map[string]any)
-	if !ok && e.Data != nil {
-		// In-process path uses typed structs; re-marshal for uniform display.
-		b, _ := jsonMarshal(e.Data)
-		_ = jsonUnmarshal(b, &data)
-	}
-	if !ok || data == nil {
-		return base
+	data := mapFromAny(e.Data)
+	if len(data) == 0 && e.Data != nil {
+		b, _ := json.Marshal(e.Data)
+		_ = json.Unmarshal(b, &data)
 	}
 
 	switch e.Type {
@@ -347,6 +501,14 @@ func formatEvent(e observability.Event) string {
 		return fmt.Sprintf("%s  err=%v", base, data["error"])
 	case observability.EventSessionCreated:
 		return fmt.Sprintf("%s  model=%v provider=%v", base, data["model"], data["provider"])
+	case observability.EventAgentStateChanged:
+		return fmt.Sprintf("%s  %v → %v", base, data["from"], data["to"])
+	case observability.EventToolStarted, observability.EventToolRequested:
+		return fmt.Sprintf("%s  %v %v", base, data["tool"], truncateStr(fmt.Sprint(data["arguments"]), 60))
+	case observability.EventToolFinished:
+		return fmt.Sprintf("%s  %v  %v bytes  %vms err=%v", base, data["tool"], data["result_size"], data["duration_ms"], data["is_error"])
+	case observability.EventToolFailed:
+		return fmt.Sprintf("%s  %v  %v", base, data["tool"], data["error"])
 	}
 	return base
 }
@@ -363,26 +525,4 @@ func atoi(s string) (int, error) {
 		n = n*10 + int(ch-'0')
 	}
 	return n, nil
-}
-
-// tiny helpers to avoid importing encoding/json in multiple forms here
-func jsonMarshal(v any) ([]byte, error) {
-	return jsonMarshalImpl(v)
-}
-
-func jsonUnmarshal(b []byte, v any) error {
-	return jsonUnmarshalImpl(b, v)
-}
-
-// DefaultWorkspace is exported for tests.
-func DefaultWorkspace() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	abs, err := filepath.Abs(wd)
-	if err != nil {
-		return wd
-	}
-	return abs
 }

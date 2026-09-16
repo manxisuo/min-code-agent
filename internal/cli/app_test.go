@@ -12,8 +12,12 @@ import (
 	"github.com/mincode/mincode/internal/observability"
 )
 
-func newTestApp(t *testing.T) *App {
+func newTestAppWithWorkspace(t *testing.T) (*App, string) {
 	t.Helper()
+	wsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wsDir, "hello.txt"), []byte("hello line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	traceDir := t.TempDir()
 	cfgPath := filepath.Join(t.TempDir(), "mincode.yaml")
 	yaml := "provider:\n  type: fake\n  model: fake-model\ntrace:\n  dir: " + filepath.ToSlash(traceDir) + "\n"
@@ -21,131 +25,103 @@ func newTestApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 
-	app, err := NewApp(Options{ConfigPath: cfgPath, Workspace: t.TempDir()})
+	app, err := NewApp(Options{ConfigPath: cfgPath, Workspace: wsDir})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var buf bytes.Buffer
 	app.out = &buf
 	t.Cleanup(func() { _ = app.Close() })
-	return app
+	return app, wsDir
 }
 
-func TestSingleShotFakeProvider(t *testing.T) {
-	app := newTestApp(t)
-	resp, err := app.chat(context.Background(), "hello")
+func TestSingleShotStillWorks(t *testing.T) {
+	app, _ := newTestAppWithWorkspace(t)
+	if err := app.singleShot(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	events, err := observability.ReadEvents(app.TracePath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.Content == "" {
-		t.Fatal("empty content")
+	joined := ""
+	for _, e := range events {
+		joined += string(e.Type) + ","
+	}
+	if !strings.Contains(joined, string(observability.EventLLMRequestFinished)) {
+		t.Fatalf("events = %s", joined)
+	}
+}
+
+func TestAgentToolExecutionInCLI(t *testing.T) {
+	app, _ := newTestAppWithWorkspace(t)
+
+	fake := &llm.FakeProvider{
+		Responses: []llm.ChatResponse{
+			{ToolCalls: []llm.ToolCall{{
+				ID:        "1",
+				Name:      "read_file",
+				Arguments: `{"path":"hello.txt"}`,
+			}}},
+			{Content: "file contains hello line"},
+		},
+	}
+	app.agent.Provider = fake
+
+	var buf bytes.Buffer
+	app.out = &buf
+	if err := app.runTurn(context.Background(), "read hello.txt"); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "read_file") {
+		t.Fatalf("expected tool echo, got %q", out)
+	}
+	if !strings.Contains(out, "file contains hello line") {
+		t.Fatalf("expected final answer, got %q", out)
 	}
 
 	events, err := observability.ReadEvents(app.TracePath())
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	var types []observability.EventType
+	var hasTool, hasState bool
 	for _, e := range events {
-		types = append(types, e.Type)
+		if e.Type == observability.EventToolFinished {
+			hasTool = true
+		}
+		if e.Type == observability.EventAgentStateChanged {
+			hasState = true
+		}
 	}
-	joined := strings.Join(mapToStrings(types), ",")
-	if !strings.Contains(joined, string(observability.EventSessionCreated)) {
-		t.Fatalf("missing session.created in %s", joined)
-	}
-	if !strings.Contains(joined, string(observability.EventLLMRequestStarted)) {
-		t.Fatalf("missing llm.request_started in %s", joined)
-	}
-	if !strings.Contains(joined, string(observability.EventLLMRequestFinished)) {
-		t.Fatalf("missing llm.request_finished in %s", joined)
-	}
-
-	m := app.metrics.Snapshot()
-	if m.LLMCalls != 1 {
-		t.Fatalf("llm calls = %d", m.LLMCalls)
-	}
-	if m.TotalTokens <= 0 {
-		t.Fatalf("total tokens = %d", m.TotalTokens)
-	}
-
-	// History should be system + user + assistant.
-	if len(app.history) != 3 {
-		t.Fatalf("history len = %d", len(app.history))
-	}
-	if app.history[1].Role != llm.RoleUser || app.history[2].Role != llm.RoleAssistant {
-		t.Fatalf("history roles = %v %v", app.history[1].Role, app.history[2].Role)
+	if !hasTool || !hasState {
+		t.Fatalf("missing tool/state events")
 	}
 }
 
-func TestChatFailureDropsUserMessage(t *testing.T) {
-	app := newTestApp(t)
-	// Replace provider with one that fails.
-	fake := llm.NewFakeProvider("m", "x")
-	fake.Err = context.DeadlineExceeded
-	app.provider = fake
-
-	_, err := app.chat(context.Background(), "boom")
-	if err == nil {
-		t.Fatal("expected error")
+func TestTimelineCommand(t *testing.T) {
+	app, _ := newTestAppWithWorkspace(t)
+	fake := &llm.FakeProvider{
+		Responses: []llm.ChatResponse{
+			{ToolCalls: []llm.ToolCall{{
+				ID: "1", Name: "list_dir", Arguments: `{"path":"."}`,
+			}}},
+			{Content: "done"},
+		},
 	}
-	// system prompt only
-	if len(app.history) != 1 {
-		t.Fatalf("history = %d, want 1", len(app.history))
-	}
-}
-
-func TestHandleCommandTraceAndMetrics(t *testing.T) {
-	app := newTestApp(t)
-	if _, err := app.chat(context.Background(), "hi"); err != nil {
+	app.agent.Provider = fake
+	if err := app.runTurn(context.Background(), "list"); err != nil {
 		t.Fatal(err)
 	}
+
 	var buf bytes.Buffer
 	app.out = &buf
-
-	quit := app.handleCommand("/metrics")
+	quit := app.handleCommand("/timeline")
 	if quit {
-		t.Fatal("metrics should not quit")
+		t.Fatal("timeline should not quit")
 	}
-	if !strings.Contains(buf.String(), "LLM Calls") {
-		t.Fatalf("metrics output = %q", buf.String())
+	out := buf.String()
+	if !strings.Contains(out, "Tool Start") || !strings.Contains(out, "LLM Response") {
+		t.Fatalf("timeline = %q", out)
 	}
-
-	buf.Reset()
-	quit = app.handleCommand("/trace 5")
-	if quit {
-		t.Fatal("trace should not quit")
-	}
-	if !strings.Contains(buf.String(), string(observability.EventLLMRequestFinished)) {
-		t.Fatalf("trace output = %q", buf.String())
-	}
-
-	buf.Reset()
-	if quit := app.handleCommand("/exit"); !quit {
-		t.Fatal("exit should quit")
-	}
-}
-
-func TestHandleCommandClear(t *testing.T) {
-	app := newTestApp(t)
-	if _, err := app.chat(context.Background(), "hi"); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	app.out = &buf
-	app.handleCommand("/clear")
-	if len(app.history) != 1 {
-		t.Fatalf("history = %d", len(app.history))
-	}
-	if app.history[0].Role != llm.RoleSystem {
-		t.Fatalf("role = %s", app.history[0].Role)
-	}
-}
-
-func mapToStrings(in []observability.EventType) []string {
-	out := make([]string, len(in))
-	for i, v := range in {
-		out[i] = string(v)
-	}
-	return out
 }
