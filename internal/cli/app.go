@@ -607,12 +607,20 @@ func timelineLine(e observability.Event) (string, bool) {
 	case observability.EventLLMRequestFinished:
 		data := mapFromAny(e.Data)
 		preview, _ := data["content_preview"].(string)
-		preview = truncateStr(preview, 60)
-		return fmt.Sprintf("%s  %s %s %s %s",
+		// Flatten newlines so a multi-line poem cannot break the timeline grid.
+		preview = strings.ReplaceAll(preview, "\r\n", "\n")
+		preview = strings.ReplaceAll(preview, "\n", " ↵ ")
+		preview = truncateStr(preview, 72)
+		head := fmt.Sprintf("%s  %s %s %s %s",
 			ts, magenta("LLM Response"),
 			gray(fmt.Sprintf("in=%v out=%v", data["input_tokens"], data["output_tokens"])),
 			gray(fmt.Sprintf("%vms", data["duration_ms"])),
-			dim(preview)), true
+			dim("…"))
+		if preview == "" {
+			return head, true
+		}
+		// Preview on its own indented line.
+		return head + "\n" + strings.Repeat(" ", 22) + dim(preview), true
 	case observability.EventLLMRequestFailed:
 		data := mapFromAny(e.Data)
 		return fmt.Sprintf("%s  %s %v", ts, red("LLM Failed"), data["error"]), true
