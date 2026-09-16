@@ -1,4 +1,4 @@
-// Package agent implements the Phase 2 read-only agent loop.
+// Package agent implements the Phase 2+3 agent loop with context management.
 package agent
 
 // State is the agent lifecycle state.

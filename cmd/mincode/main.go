@@ -13,6 +13,8 @@ import (
 )
 
 func main() {
+	enableVirtualTerminal()
+
 	opts := cli.Options{}
 	flag.StringVar(&opts.ConfigPath, "config", "", "path to mincode.yaml")
 	flag.StringVar(&opts.Prompt, "p", "", "run a single prompt and exit")
@@ -25,6 +27,7 @@ func main() {
 
 Usage:
   mincode [flags]
+  mincode <workspace-dir> [flags]
 
 Flags:
 `)
@@ -32,15 +35,24 @@ Flags:
 		fmt.Fprintf(flag.CommandLine.Output(), `
 Examples:
   mincode
+  mincode D:\\Code\\myproject
   mincode -p "hello"
   mincode --provider fake -p "offline demo"
   mincode --config ./mincode.yaml
 
+Config resolution (when -config is omitted):
+  <workspace>/mincode.yaml → <workspace>/mincode.yml → ./mincode.yaml
+
 REPL commands:
-  /help  /timeline  /trace [n]  /metrics  /clear  /exit
+  /help  /timeline  /context  /trace [n]  /metrics  /clear  /exit
 `)
 	}
 	flag.Parse()
+
+	// Positional arg: mincode <workspace-dir>
+	if opts.Workspace == "" && flag.NArg() > 0 {
+		opts.Workspace = flag.Arg(0)
+	}
 
 	app, err := cli.NewApp(opts)
 	if err != nil {

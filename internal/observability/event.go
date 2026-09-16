@@ -16,6 +16,9 @@ const (
 	EventAgentFinished EventType = "agent.finished"
 	EventAgentFailed   EventType = "agent.failed"
 
+	EventContextBuildStarted EventType = "context.build_started"
+	EventContextBuilt        EventType = "context.built"
+
 	EventLLMRequestStarted  EventType = "llm.request_started"
 	EventLLMRequestFinished EventType = "llm.request_finished"
 	EventLLMRequestFailed   EventType = "llm.request_failed"
@@ -92,6 +95,17 @@ type SessionCreatedData struct {
 type StateChangedData struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+}
+
+// ContextBuiltData is payload for context.build_started / context.built.
+type ContextBuiltData struct {
+	Step        int `json:"step"`
+	TotalTokens int `json:"total_tokens"`
+	ToolTokens  int `json:"tool_tokens"`
+	Budget      int `json:"budget"`
+	Included    int `json:"included_count"`
+	Excluded    int `json:"excluded_count"`
+	Truncated   int `json:"truncated_count"`
 }
 
 // ToolEventData is payload for tool.* events.

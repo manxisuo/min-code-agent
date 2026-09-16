@@ -124,4 +124,27 @@ func TestTimelineCommand(t *testing.T) {
 	if !strings.Contains(out, "Tool Start") || !strings.Contains(out, "LLM Response") {
 		t.Fatalf("timeline = %q", out)
 	}
+	if !strings.Contains(out, "Context Built") {
+		t.Fatalf("timeline missing context: %q", out)
+	}
+}
+
+func TestContextSnapshotCommand(t *testing.T) {
+	app, _ := newTestAppWithWorkspace(t)
+	var buf bytes.Buffer
+	app.out = &buf
+	app.handleCommand("/context")
+	if !strings.Contains(buf.String(), "no context snapshot") {
+		t.Fatalf("empty state = %q", buf.String())
+	}
+
+	if err := app.runTurn(context.Background(), "hello"); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	app.handleCommand("/context")
+	out := buf.String()
+	if !strings.Contains(out, "Context Snapshot") || !strings.Contains(out, "system") {
+		t.Fatalf("snapshot = %q", out)
+	}
 }

@@ -32,7 +32,7 @@ func testWorkspace(t *testing.T) *tools.Workspace {
 	return ws
 }
 
-func newAgentWithFake(t *testing.T, fake *llm.FakeProvider) (*Agent, *observability.Bus) {
+func newAgentWithFake(t *testing.T, fake *llm.FakeProvider) *Agent {
 	t.Helper()
 	ws := testWorkspace(t)
 	reg := tools.NewRegistry()
@@ -41,15 +41,12 @@ func newAgentWithFake(t *testing.T, fake *llm.FakeProvider) (*Agent, *observabil
 	reg.Register(&tools.Glob{WS: ws})
 	reg.Register(&tools.Grep{WS: ws})
 	bus := observability.NewBus()
-	var events []observability.Event
-	bus.Subscribe(func(e observability.Event) { events = append(events, e) })
-	ag := New(fake, reg, bus, "test-session", 10, "system")
-	return ag, bus
+	return New(fake, reg, bus, "test-session", 10, "system", 32000)
 }
 
 func TestAgentFinalWithoutTools(t *testing.T) {
 	fake := llm.NewFakeProvider("m", "final answer")
-	ag, _ := newAgentWithFake(t, fake)
+	ag := newAgentWithFake(t, fake)
 
 	res, err := ag.Run(context.Background(), "hi")
 	if err != nil {
@@ -58,11 +55,11 @@ func TestAgentFinalWithoutTools(t *testing.T) {
 	if res.Final != "final answer" {
 		t.Fatalf("final = %q", res.Final)
 	}
-	if res.ToolCalls != 0 {
-		t.Fatalf("tool calls = %d", res.ToolCalls)
+	if res.ToolCalls != 0 || res.Steps != 1 {
+		t.Fatalf("steps=%d tools=%d", res.Steps, res.ToolCalls)
 	}
-	if res.Steps != 1 {
-		t.Fatalf("steps = %d", res.Steps)
+	if res.Snapshot == nil || res.Snapshot.TotalTokens <= 0 {
+		t.Fatal("missing snapshot")
 	}
 }
 
@@ -82,7 +79,7 @@ func TestAgentToolLoop(t *testing.T) {
 			},
 		},
 	}
-	ag, _ := newAgentWithFake(t, fake)
+	ag := newAgentWithFake(t, fake)
 
 	res, err := ag.Run(context.Background(), "read go.mod")
 	if err != nil {
@@ -91,14 +88,10 @@ func TestAgentToolLoop(t *testing.T) {
 	if res.Final != "module example.com/demo" {
 		t.Fatalf("final = %q", res.Final)
 	}
-	if res.ToolCalls != 1 {
-		t.Fatalf("tool calls = %d", res.ToolCalls)
-	}
-	if res.Steps != 2 {
-		t.Fatalf("steps = %d", res.Steps)
+	if res.ToolCalls != 1 || res.Steps != 2 {
+		t.Fatalf("steps=%d tools=%d", res.Steps, res.ToolCalls)
 	}
 
-	// Second LLM call must have received the tool result.
 	reqs := fake.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("requests = %d", len(reqs))
@@ -112,7 +105,6 @@ func TestAgentToolLoop(t *testing.T) {
 	if !foundToolMsg {
 		t.Fatalf("tool result missing from second request: %+v", reqs[1].Messages)
 	}
-	// Tools should be advertised.
 	if len(reqs[0].Tools) != 4 {
 		t.Fatalf("advertised tools = %d", len(reqs[0].Tools))
 	}
@@ -125,7 +117,7 @@ func TestAgentUnknownToolRecovered(t *testing.T) {
 			{Content: "ok after error"},
 		},
 	}
-	ag, _ := newAgentWithFake(t, fake)
+	ag := newAgentWithFake(t, fake)
 	res, err := ag.Run(context.Background(), "go")
 	if err != nil {
 		t.Fatal(err)
@@ -136,12 +128,12 @@ func TestAgentUnknownToolRecovered(t *testing.T) {
 }
 
 func TestAgentLoopDetection(t *testing.T) {
-	fake := &llm.FakeProvider{}
-	// Always request the same tool call.
-	fake.Responses = []llm.ChatResponse{{
-		ToolCalls: []llm.ToolCall{{ID: "1", Name: "list_dir", Arguments: `{"path":"."}`}},
-	}}
-	ag, _ := newAgentWithFake(t, fake)
+	fake := &llm.FakeProvider{
+		Responses: []llm.ChatResponse{{
+			ToolCalls: []llm.ToolCall{{ID: "1", Name: "list_dir", Arguments: `{"path":"."}`}},
+		}},
+	}
+	ag := newAgentWithFake(t, fake)
 	ag.MaxSteps = 20
 
 	_, err := ag.Run(context.Background(), "loop")
@@ -151,9 +143,8 @@ func TestAgentLoopDetection(t *testing.T) {
 }
 
 func TestAgentMaxSteps(t *testing.T) {
-	prov := &alwaysToolProvider{}
-	ag, _ := newAgentWithFake(t, llm.NewFakeProvider("m", "x"))
-	ag.Provider = prov
+	ag := newAgentWithFake(t, llm.NewFakeProvider("m", "x"))
+	ag.Provider = &alwaysToolProvider{}
 	ag.MaxSteps = 3
 
 	_, err := ag.Run(context.Background(), "go")
@@ -165,15 +156,12 @@ func TestAgentMaxSteps(t *testing.T) {
 	}
 }
 
-type alwaysToolProvider struct {
-	n int
-}
+type alwaysToolProvider struct{}
 
 func (p *alwaysToolProvider) Name() string  { return "always" }
 func (p *alwaysToolProvider) Model() string { return "m" }
 
 func (p *alwaysToolProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
-	p.n++
 	return &llm.ChatResponse{
 		ToolCalls: []llm.ToolCall{{
 			ID:        "c",
@@ -185,7 +173,7 @@ func (p *alwaysToolProvider) Chat(ctx context.Context, req llm.ChatRequest) (*ll
 
 func TestAgentCancelled(t *testing.T) {
 	fake := llm.NewFakeProvider("m", "should not return")
-	ag, _ := newAgentWithFake(t, fake)
+	ag := newAgentWithFake(t, fake)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := ag.Run(ctx, "hi")
@@ -196,7 +184,7 @@ func TestAgentCancelled(t *testing.T) {
 
 func TestClearConversation(t *testing.T) {
 	fake := llm.NewFakeProvider("m", "a", "b")
-	ag, _ := newAgentWithFake(t, fake)
+	ag := newAgentWithFake(t, fake)
 	if _, err := ag.Run(context.Background(), "one"); err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +192,34 @@ func TestClearConversation(t *testing.T) {
 		t.Fatal(err)
 	}
 	ag.ClearConversation()
-	if len(ag.History) != 1 || ag.History[0].Role != llm.RoleSystem {
-		t.Fatalf("history = %+v", ag.History)
+	if ag.Ctx.Len() != 0 {
+		t.Fatalf("entries = %d", ag.Ctx.Len())
+	}
+}
+
+func TestContextEventsEmitted(t *testing.T) {
+	fake := llm.NewFakeProvider("m", "ok")
+	ws := testWorkspace(t)
+	reg := tools.NewRegistry()
+	reg.Register(&tools.ReadFile{WS: ws})
+	bus := observability.NewBus()
+	var types []observability.EventType
+	bus.Subscribe(func(e observability.Event) { types = append(types, e.Type) })
+	ag := New(fake, reg, bus, "s", 5, "sys", 1000)
+
+	if _, err := ag.Run(context.Background(), "hi"); err != nil {
+		t.Fatal(err)
+	}
+	var hasBuilt, hasBuildStart bool
+	for _, typ := range types {
+		if typ == observability.EventContextBuilt {
+			hasBuilt = true
+		}
+		if typ == observability.EventContextBuildStarted {
+			hasBuildStart = true
+		}
+	}
+	if !hasBuilt || !hasBuildStart {
+		t.Fatalf("types = %v", types)
 	}
 }

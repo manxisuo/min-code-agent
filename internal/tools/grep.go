@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 const (
@@ -192,7 +193,11 @@ func grepFile(ctx context.Context, root, path string, re *regexp.Regexp) ([]grep
 		if re.MatchString(line) {
 			text := line
 			if len(text) > 200 {
-				text = text[:200] + "..."
+				end := 200
+				for end > 0 && !utf8.RuneStart(text[end]) {
+					end--
+				}
+				text = text[:end] + "..."
 			}
 			out = append(out, grepMatch{Path: rel, Line: lineNo, Text: text})
 			if len(out) >= grepMaxMatches {

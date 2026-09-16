@@ -1,0 +1,188 @@
+package ctxmgr
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/mincode/mincode/internal/llm"
+)
+
+func TestEstimateTokens(t *testing.T) {
+	if EstimateTokens("") != 0 {
+		t.Fatal("empty should be 0")
+	}
+	if EstimateTokens("hello") <= 0 {
+		t.Fatal("positive")
+	}
+	// CJK should cost more than the same ASCII length roughly.
+	cjk := EstimateTokens("你好世界你好世界")
+	asc := EstimateTokens("abcdefgh")
+	if cjk <= asc {
+		t.Fatalf("cjk=%d asc=%d, expect cjk heavier", cjk, asc)
+	}
+}
+
+func TestBuildRequestIncludesSystemAndUser(t *testing.T) {
+	m := New("SYS", "", 10000)
+	m.AppendUser("hi there")
+	req, snap := m.BuildRequest(nil)
+
+	if len(req.Messages) < 2 {
+		t.Fatalf("messages = %d", len(req.Messages))
+	}
+	if req.Messages[0].Role != llm.RoleSystem || req.Messages[0].Content != "SYS" {
+		t.Fatalf("first = %+v", req.Messages[0])
+	}
+	if req.Messages[len(req.Messages)-1].Content != "hi there" {
+		t.Fatalf("last = %+v", req.Messages[len(req.Messages)-1])
+	}
+	if snap.TotalTokens <= 0 {
+		t.Fatal("tokens")
+	}
+	if snap.Included < 2 {
+		t.Fatalf("included = %d", snap.Included)
+	}
+
+	// Snapshot item sources
+	var sources []Source
+	for _, it := range snap.Items {
+		sources = append(sources, it.Source)
+	}
+	joined := ""
+	for _, s := range sources {
+		joined += string(s) + ","
+	}
+	if !strings.Contains(joined, "system") || !strings.Contains(joined, "user_input") {
+		t.Fatalf("sources = %s", joined)
+	}
+}
+
+func TestBudgetExcludesOldest(t *testing.T) {
+	// Tiny budget forces exclusions.
+	m := New("SYS", "", 5)
+	m.AppendUser("msg-one")
+	m.AppendAssistant(llm.Message{Role: llm.RoleAssistant, Content: "reply-one"})
+	m.AppendUser("msg-two")
+
+	req, snap := m.BuildRequest(nil)
+
+	if snap.Excluded == 0 {
+		t.Fatalf("expected exclusions, snap=%s", snap)
+	}
+	// Newest user input must still be present.
+	found := false
+	for _, msg := range req.Messages {
+		if msg.Content == "msg-two" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("newest user missing: %+v", req.Messages)
+	}
+	// System still present
+	if req.Messages[0].Role != llm.RoleSystem {
+		t.Fatalf("system dropped: %+v", req.Messages)
+	}
+}
+
+func TestToolResultTruncation(t *testing.T) {
+	m := New("SYS", "", 200)
+	m.AppendUser("go")
+	big := strings.Repeat("line of tool output\n", 50)
+	m.AppendToolResult("call1", big)
+
+	req, snap := m.BuildRequest(nil)
+	if snap.Truncated == 0 && snap.Excluded == 0 {
+		t.Fatalf("expected truncate or exclude, snap=%s total=%d", snap, snap.TotalTokens)
+	}
+	if snap.TotalTokens > m.Budget()+50 {
+		t.Fatalf("still over budget: %d > %d", snap.TotalTokens, m.Budget())
+	}
+	// Messages should not explode.
+	_ = req
+}
+
+func TestInstructionsIncluded(t *testing.T) {
+	m := New("SYS", "Use tabs", 10000)
+	m.AppendUser("hi")
+	_, snap := m.BuildRequest(nil)
+	found := false
+	for _, it := range snap.Items {
+		if it.Source == SourceInstructions {
+			found = true
+			if !it.Included {
+				t.Fatal("instructions should be included")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing instructions item")
+	}
+}
+
+func TestDropLastUser(t *testing.T) {
+	m := New("S", "", 1000)
+	m.AppendUser("a")
+	m.AppendUser("b")
+	m.DropLastUser()
+	if m.Len() != 1 {
+		t.Fatalf("len = %d", m.Len())
+	}
+}
+
+func TestClearKeepsSystem(t *testing.T) {
+	m := New("SYS", "INS", 1000)
+	m.AppendUser("x")
+	m.Clear()
+	if m.Len() != 0 {
+		t.Fatal("entries should be empty")
+	}
+	if m.System() != "SYS" || m.Instructions() != "INS" {
+		t.Fatal("system/instructions cleared")
+	}
+}
+
+func TestToolDefsCountAgainstBudget(t *testing.T) {
+	m := New("SYS", "", 5000)
+	m.AppendUser("hi")
+	defs := []llm.ToolDefinition{
+		{Name: "read_file", Description: "Read a file from the workspace with optional line range", Parameters: []byte(`{"type":"object","properties":{"path":{"type":"string"}}}`)},
+		{Name: "grep", Description: "Search file contents", Parameters: []byte(`{"type":"object","properties":{"pattern":{"type":"string"}}}`)},
+	}
+	_, snap := m.BuildRequest(defs)
+	if snap.ToolTokens <= 0 {
+		t.Fatalf("tool tokens should be counted: %+v", snap)
+	}
+	// Total messages + tools should be reported together for budgeting.
+	if snap.TotalTokens+snap.ToolTokens > snap.Budget+100 {
+		t.Fatalf("over budget: msgs=%d tools=%d budget=%d", snap.TotalTokens, snap.ToolTokens, snap.Budget)
+	}
+}
+
+func TestAppendToolResultCapsSize(t *testing.T) {
+	m := New("SYS", "", 32000)
+	big := strings.Repeat("汉字测试内容\n", 2000)
+	m.AppendToolResult("c1", big)
+	if m.entries[len(m.entries)-1].tokens > maxToolResultTokens+50 {
+		t.Fatalf("tool result tokens = %d, want cap ~%d", m.entries[len(m.entries)-1].tokens, maxToolResultTokens)
+	}
+}
+
+func TestEstimateTokensCJK(t *testing.T) {
+	// CJK should be ~1 token per char, not /2.
+	s := strings.Repeat("中", 100)
+	est := EstimateTokens(s)
+	if est < 90 {
+		t.Fatalf("CJK estimate too low: %d", est)
+	}
+}
+
+func TestSnapshotSummary(t *testing.T) {
+	m := New("SYS", "", 10000)
+	m.AppendUser("hello")
+	_, snap := m.BuildRequest(nil)
+	s := snap.Summary()
+	if !strings.Contains(s, "Context Snapshot") || !strings.Contains(s, "Total") {
+		t.Fatalf("summary = %s", s)
+	}
+}

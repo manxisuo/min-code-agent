@@ -19,10 +19,12 @@ type ProviderConfig struct {
 	TimeoutSec  int     `yaml:"timeout_sec"`
 }
 
-// AgentConfig holds basic agent-loop limits (used starting Phase 2).
+// AgentConfig holds basic agent-loop limits.
 type AgentConfig struct {
 	MaxSteps     int    `yaml:"max_steps"`
 	SystemPrompt string `yaml:"system_prompt"`
+	// TokenBudget caps estimated prompt tokens per LLM call (0 = default 32000).
+	TokenBudget int `yaml:"token_budget"`
 }
 
 // TraceConfig controls where JSONL traces are written.
@@ -43,6 +45,7 @@ func Default() Config {
 		Agent: AgentConfig{
 			MaxSteps:     30,
 			SystemPrompt: DefaultSystemPrompt,
+			TokenBudget:  32000,
 		},
 		Trace: TraceConfig{
 			Dir: ".mincode/traces",

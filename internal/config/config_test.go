@@ -86,6 +86,35 @@ func TestLoadMissingFileInCwdIsOK(t *testing.T) {
 	}
 }
 
+func TestLoadFromWorkspaceConfig(t *testing.T) {
+	ws := t.TempDir()
+	yaml := "provider:\n  type: fake\n  model: ws-model\n  base_url: https://api.deepseek.com/v1\n"
+	if err := os.WriteFile(filepath.Join(ws, "mincode.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	other := t.TempDir()
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(other); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	cfg, err := LoadFrom("", ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider.Model != "ws-model" {
+		t.Fatalf("model = %q", cfg.Provider.Model)
+	}
+	if cfg.Provider.BaseURL != "https://api.deepseek.com/v1" {
+		t.Fatalf("base_url = %q", cfg.Provider.BaseURL)
+	}
+}
+
 func TestTracePath(t *testing.T) {
 	p := TracePath("traces", "abc")
 	if filepath.Base(p) != "abc.jsonl" {

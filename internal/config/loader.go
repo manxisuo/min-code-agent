@@ -13,6 +13,12 @@ import (
 // environment variable overrides. Missing file is not an error when
 // path is empty; a non-empty missing path is an error.
 func Load(path string) (Config, error) {
+	return LoadFrom(path, "")
+}
+
+// LoadFrom is like Load but also searches the workspace directory for
+// mincode.yaml / mincode.yml when path is empty.
+func LoadFrom(path, workspace string) (Config, error) {
 	cfg := Default()
 
 	if path != "" {
@@ -24,8 +30,16 @@ func Load(path string) (Config, error) {
 			return cfg, fmt.Errorf("parse config %s: %w", path, err)
 		}
 	} else {
-		// Try conventional locations; ignore if absent.
-		for _, candidate := range []string{"mincode.yaml", "mincode.yml"} {
+		var candidates []string
+		if workspace != "" {
+			candidates = append(candidates,
+				filepath.Join(workspace, "mincode.yaml"),
+				filepath.Join(workspace, "mincode.yml"),
+			)
+		}
+		candidates = append(candidates, "mincode.yaml", "mincode.yml")
+
+		for _, candidate := range candidates {
 			data, err := os.ReadFile(candidate)
 			if err != nil {
 				continue
@@ -86,6 +100,9 @@ func normalize(cfg *Config) {
 	}
 	if cfg.Agent.MaxSteps <= 0 {
 		cfg.Agent.MaxSteps = 30
+	}
+	if cfg.Agent.TokenBudget <= 0 {
+		cfg.Agent.TokenBudget = 32000
 	}
 	if cfg.Agent.SystemPrompt == "" {
 		cfg.Agent.SystemPrompt = DefaultSystemPrompt

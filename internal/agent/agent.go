@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
+	"github.com/mincode/mincode/internal/ctxmgr"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
 	"github.com/mincode/mincode/internal/tools"
@@ -24,6 +26,18 @@ const (
 	toolPreviewLen  = 200
 )
 
+// truncatePreview cuts s to at most max bytes on a UTF-8 rune boundary.
+func truncatePreview(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	end := max
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	return s[:end] + "..."
+}
+
 // Agent coordinates the loop; it does not touch the filesystem or shell directly.
 type Agent struct {
 	Provider  llm.Provider
@@ -32,19 +46,15 @@ type Agent struct {
 	SessionID string
 	MaxSteps  int
 
-	// History is the in-memory conversation (Phase 3 will replace with Context Manager).
-	History []llm.Message
-	State   State
+	// Ctx builds budgeted prompts and keeps conversation state.
+	Ctx   *ctxmgr.Manager
+	State State
 }
 
-// New creates a Phase 2 read-only agent.
-func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, sessionID string, maxSteps int, systemPrompt string) *Agent {
+// New creates an agent with a context manager.
+func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, sessionID string, maxSteps int, systemPrompt string, tokenBudget int) *Agent {
 	if maxSteps <= 0 {
 		maxSteps = defaultMaxSteps
-	}
-	history := []llm.Message{}
-	if systemPrompt != "" {
-		history = append(history, llm.Message{Role: llm.RoleSystem, Content: systemPrompt})
 	}
 	return &Agent{
 		Provider:  provider,
@@ -52,27 +62,14 @@ func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, ses
 		Bus:       bus,
 		SessionID: sessionID,
 		MaxSteps:  maxSteps,
-		History:   history,
+		Ctx:       ctxmgr.New(systemPrompt, "", tokenBudget),
 		State:     StateIdle,
 	}
 }
 
-// ResetHistory keeps the system prompt and drops the rest.
-func (a *Agent) ResetHistory(systemPrompt string) {
-	a.History = nil
-	if systemPrompt != "" {
-		a.History = append(a.History, llm.Message{Role: llm.RoleSystem, Content: systemPrompt})
-	}
-	a.State = StateIdle
-}
-
 // ClearConversation drops user/assistant/tool turns but keeps system prompt.
 func (a *Agent) ClearConversation() {
-	if len(a.History) > 0 && a.History[0].Role == llm.RoleSystem {
-		a.History = a.History[:1]
-	} else {
-		a.History = nil
-	}
+	a.Ctx.Clear()
 	a.State = StateIdle
 }
 
@@ -80,7 +77,7 @@ func (a *Agent) emit(typ observability.EventType, data any) {
 	if a.Bus == nil {
 		return
 	}
-	a.Bus.Publish(observability.NewEvent(a.SessionID, len(a.History), typ, data))
+	a.Bus.Publish(observability.NewEvent(a.SessionID, a.Ctx.Len(), typ, data))
 }
 
 func (a *Agent) setState(to State) {
@@ -101,11 +98,12 @@ type Result struct {
 	Steps     int
 	ToolCalls int
 	State     State
+	Snapshot  *ctxmgr.Snapshot
 }
 
 // Run processes one user message through the agent loop.
 func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
-	a.History = append(a.History, llm.Message{Role: llm.RoleUser, Content: userInput})
+	a.Ctx.AppendUser(userInput)
 
 	var (
 		steps     int
@@ -119,16 +117,27 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 
 		if err := ctx.Err(); err != nil {
 			a.setState(StateCancelled)
-			// Drop the failed user turn so retry is clean.
-			a.dropLastUser()
+			a.Ctx.DropLastUser()
 			return nil, err
 		}
 
 		a.setState(StateBuildingContext)
-		req := llm.ChatRequest{
-			Messages: a.History,
-			Tools:    a.toolDefinitions(),
-		}
+		a.emit(observability.EventContextBuildStarted, observability.ContextBuiltData{
+			Step:   step + 1,
+			Budget: a.Ctx.Budget(),
+		})
+
+		defs := a.toolDefinitions()
+		req, snap := a.Ctx.BuildRequest(defs)
+		a.emit(observability.EventContextBuilt, observability.ContextBuiltData{
+			Step:        snap.Step,
+			TotalTokens: snap.TotalTokens,
+			ToolTokens:  snap.ToolTokens,
+			Budget:      snap.Budget,
+			Included:    snap.Included,
+			Excluded:    snap.Excluded,
+			Truncated:   snap.Truncated,
+		})
 
 		a.setState(StateCallingLLM)
 		start := time.Now()
@@ -142,25 +151,35 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 			} else {
 				a.setState(StateFailed)
 			}
-			a.dropLastUser()
+			a.Ctx.DropLastUser()
 			return nil, err
 		}
 		a.emitLLMFinished(req, resp, elapsed)
 
+		// Calibrate local token estimates against provider-reported prompt_tokens.
+		if resp.Usage.PromptTokens > 0 {
+			est := snap.TotalTokens + snap.ToolTokens
+			a.Ctx.ObserveUsage(est, resp.Usage.PromptTokens)
+		}
+
 		a.setState(StateProcessingResponse)
 
-		// Final answer: content and no tool calls.
 		if len(resp.ToolCalls) == 0 {
-			a.History = append(a.History, llm.Message{
+			a.Ctx.AppendAssistant(llm.Message{
 				Role:    llm.RoleAssistant,
 				Content: resp.Content,
 			})
 			a.setState(StateFinished)
-			return &Result{Final: resp.Content, Steps: steps, ToolCalls: toolCalls, State: StateFinished}, nil
+			return &Result{
+				Final:     resp.Content,
+				Steps:     steps,
+				ToolCalls: toolCalls,
+				State:     StateFinished,
+				Snapshot:  a.Ctx.LastSnapshot(),
+			}, nil
 		}
 
-		// Record assistant turn (may include text + tool calls).
-		a.History = append(a.History, llm.Message{
+		a.Ctx.AppendAssistant(llm.Message{
 			Role:      llm.RoleAssistant,
 			Content:   resp.Content,
 			ToolCalls: resp.ToolCalls,
@@ -191,29 +210,23 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 			if execErr != nil {
 				if errors.Is(execErr, context.Canceled) || errors.Is(execErr, context.DeadlineExceeded) {
 					a.setState(StateCancelled)
-					a.dropLastUser()
+					a.Ctx.DropLastUser()
 					return nil, execErr
 				}
-				// Convert unexpected errors into tool error messages for the model.
 				result = tools.Result{Content: execErr.Error(), IsError: true}
 			}
 
-			a.History = append(a.History, llm.Message{
-				Role:       llm.RoleTool,
-				Content:    result.Content,
-				ToolCallID: tc.ID,
-			})
+			a.Ctx.AppendToolResult(tc.ID, result.Content)
 		}
 	}
 
 	a.setState(StateMaxStepsReached)
-	return &Result{Steps: steps, ToolCalls: toolCalls, State: StateMaxStepsReached}, fmt.Errorf("%w: %d", MaxStepsExceeded, a.MaxSteps)
-}
-
-func (a *Agent) dropLastUser() {
-	if n := len(a.History); n > 0 && a.History[n-1].Role == llm.RoleUser {
-		a.History = a.History[:n-1]
-	}
+	return &Result{
+		Steps:     steps,
+		ToolCalls: toolCalls,
+		State:     StateMaxStepsReached,
+		Snapshot:  a.Ctx.LastSnapshot(),
+	}, fmt.Errorf("%w: %d", MaxStepsExceeded, a.MaxSteps)
 }
 
 func (a *Agent) toolDefinitions() []llm.ToolDefinition {
@@ -267,9 +280,8 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 
 	preview := result.Content
 	if len(preview) > toolPreviewLen {
-		preview = preview[:toolPreviewLen] + "..."
+		preview = truncatePreview(preview, toolPreviewLen)
 	}
-	evType := observability.EventToolFinished
 	data := observability.ToolEventData{
 		Tool:          tc.Name,
 		Arguments:     args,
@@ -281,7 +293,7 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 	if result.IsError {
 		data.Error = result.Content
 	}
-	a.emit(evType, data)
+	a.emit(observability.EventToolFinished, data)
 	return result, nil
 }
 
@@ -296,7 +308,7 @@ func (a *Agent) emitLLMStarted(req llm.ChatRequest) {
 func (a *Agent) emitLLMFinished(req llm.ChatRequest, resp *llm.ChatResponse, elapsed time.Duration) {
 	preview := resp.Content
 	if len(preview) > toolPreviewLen {
-		preview = preview[:toolPreviewLen] + "..."
+		preview = truncatePreview(preview, toolPreviewLen)
 	}
 	if preview == "" && len(resp.ToolCalls) > 0 {
 		preview = fmt.Sprintf("tool_calls: %d", len(resp.ToolCalls))
