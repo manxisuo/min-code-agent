@@ -75,6 +75,14 @@ func (m *Manager) ObserveUsage(estimated, actualPromptTokens int) {
 	if m.lastSnapshot != nil && actualPromptTokens > 0 {
 		m.lastSnapshot.ActualPromptTokens = actualPromptTokens
 		m.lastSnapshot.EstimateRatio = m.cal.Ratio()
+		m.lastSnapshot.RequestFailed = false
+	}
+}
+
+// MarkRequestFailed flags the last snapshot as having no API usage (call failed).
+func (m *Manager) MarkRequestFailed() {
+	if m.lastSnapshot != nil {
+		m.lastSnapshot.RequestFailed = true
 	}
 }
 
@@ -221,14 +229,39 @@ func (m *Manager) BuildRequest(tools []llm.ToolDefinition) (llm.ChatRequest, Sna
 			}
 		}
 		for _, idx := range idxs {
+			// Drop assistant-with-tools together with its following tool results
+			// so we never leave orphan tool messages behind.
 			if total <= msgBudget {
 				break
 			}
 			if parts[idx].src == SourceUserInput && parts[idx].order == newest {
 				continue
 			}
-			total -= parts[idx].tok
+			if parts[idx].excluded {
+				continue
+			}
 			parts[idx].excluded = true
+			total -= parts[idx].tok
+			// Cascade: if this is an assistant that requested tools, also exclude
+			// the tool results that belong to it (contiguous following tool_result parts).
+			if parts[idx].msg.Role == llm.RoleAssistant && len(parts[idx].msg.ToolCalls) > 0 {
+				ids := map[string]bool{}
+				for _, tc := range parts[idx].msg.ToolCalls {
+					ids[tc.ID] = true
+				}
+				for j := idx + 1; j < len(parts); j++ {
+					if parts[j].excluded {
+						continue
+					}
+					if parts[j].msg.Role != llm.RoleTool {
+						break
+					}
+					if ids[parts[j].msg.ToolCallID] || parts[j].src == SourceToolResult {
+						parts[j].excluded = true
+						total -= parts[j].tok
+					}
+				}
+			}
 		}
 	}
 
@@ -306,6 +339,10 @@ func (m *Manager) BuildRequest(tools []llm.ToolDefinition) (llm.ChatRequest, Sna
 	if systemText != "" {
 		messages = append([]llm.Message{{Role: llm.RoleSystem, Content: systemText}}, messages...)
 	}
+
+	// Providers reject tool messages that are not paired with a preceding
+	// assistant tool_calls message. Repair any budget/history damage.
+	messages = sanitizeToolPairs(messages)
 
 	snap := Snapshot{
 		Step:        m.step,
@@ -397,6 +434,60 @@ func trimSpace(s string) string {
 		end--
 	}
 	return s[start:end]
+}
+
+// sanitizeToolPairs ensures every tool message follows an assistant message
+// that declared a matching tool_call id. Orphan tool messages are dropped;
+// unfulfilled tool_calls get a placeholder tool result so the provider
+// accepts the transcript (OpenAI-compatible rule).
+func sanitizeToolPairs(msgs []llm.Message) []llm.Message {
+	out := make([]llm.Message, 0, len(msgs))
+	pending := map[string]bool{} // tool_call ids awaiting results
+
+	flushPending := func() {
+		for id := range pending {
+			out = append(out, llm.Message{
+				Role:       llm.RoleTool,
+				Content:    "(tool result missing after context rebuild)",
+				ToolCallID: id,
+			})
+		}
+		pending = map[string]bool{}
+	}
+
+	for _, m := range msgs {
+		switch m.Role {
+		case llm.RoleTool:
+			if pending[m.ToolCallID] {
+				out = append(out, m)
+				delete(pending, m.ToolCallID)
+			}
+			// else: orphan tool message — drop
+		case llm.RoleAssistant:
+			// Previous assistant still waiting for tool results.
+			if len(pending) > 0 {
+				flushPending()
+			}
+			out = append(out, m)
+			if len(m.ToolCalls) > 0 {
+				pending = map[string]bool{}
+				for _, tc := range m.ToolCalls {
+					if tc.ID != "" {
+						pending[tc.ID] = true
+					}
+				}
+			}
+		default: // user / system
+			if len(pending) > 0 {
+				flushPending()
+			}
+			out = append(out, m)
+		}
+	}
+	if len(pending) > 0 {
+		flushPending()
+	}
+	return out
 }
 
 // FormatSnapshot renders a snapshot for the CLI.

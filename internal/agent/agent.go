@@ -67,7 +67,7 @@ func New(provider llm.Provider, reg *tools.Registry, bus *observability.Bus, ses
 		Bus:       bus,
 		SessionID: sessionID,
 		MaxSteps:  maxSteps,
-		Policy:    permission.NewDefaultPolicy(),
+		Policy:    &permission.ShellAwarePolicy{Inner: permission.NewDefaultPolicy()},
 		Ctx:       ctxmgr.New(systemPrompt, "", tokenBudget),
 		State:     StateIdle,
 	}
@@ -152,6 +152,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 		elapsed := time.Since(start)
 		if err != nil {
 			a.emitLLMFailed(elapsed, err)
+			a.Ctx.MarkRequestFailed()
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				a.setState(StateCancelled)
 			} else {

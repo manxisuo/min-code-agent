@@ -48,7 +48,7 @@ func (p *CompatibleProvider) Model() string {
 // wireMessage is the OpenAI chat message wire format.
 type wireMessage struct {
 	Role       string         `json:"role"`
-	Content    string         `json:"content,omitempty"`
+	Content    string         `json:"content"`
 	ToolCalls  []wireToolCall `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 }
@@ -193,13 +193,22 @@ func toWireMessages(msgs []Message) []wireMessage {
 	for _, m := range msgs {
 		wm := wireMessage{
 			Role:       string(m.Role),
-			Content:    m.Content,
 			ToolCallID: m.ToolCallID,
+		}
+		// Always include content for assistant/tool (some providers require the key).
+		if m.Content != "" || m.Role == RoleAssistant || m.Role == RoleTool {
+			wm.Content = m.Content
+		} else {
+			wm.Content = m.Content
 		}
 		for _, tc := range m.ToolCalls {
 			wtc := wireToolCall{ID: tc.ID, Type: "function"}
 			wtc.Function.Name = tc.Name
-			wtc.Function.Arguments = tc.Arguments
+			if tc.Arguments == "" {
+				wtc.Function.Arguments = "{}"
+			} else {
+				wtc.Function.Arguments = tc.Arguments
+			}
 			wm.ToolCalls = append(wm.ToolCalls, wtc)
 		}
 		out = append(out, wm)

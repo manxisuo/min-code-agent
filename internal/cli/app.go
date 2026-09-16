@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -110,8 +111,10 @@ func NewApp(opts Options) (*App, error) {
 	registry.Register(&tools.Grep{WS: ws})
 	registry.Register(&tools.WriteFile{WS: ws})
 	registry.Register(&tools.EditFile{WS: ws})
+	registry.Register(&tools.Shell{WS: ws})
 
-	ag := agent.New(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, cfg.Agent.SystemPrompt, cfg.Agent.TokenBudget)
+	sysPrompt := cfg.Agent.SystemPrompt + config.PlatformShellHint(runtime.GOOS)
+	ag := agent.New(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, sysPrompt, cfg.Agent.TokenBudget)
 	// Approver wired after App exists so it can print to a.out and read stdin.
 
 	app := &App{
@@ -248,7 +251,7 @@ func (a *App) repl(ctx context.Context) error {
 }
 
 func (a *App) toolNames() []string {
-	return []string{"read_file", "list_dir", "glob", "grep", "write_file", "edit_file"}
+	return []string{"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "shell"}
 }
 
 // runTurn executes one user turn through the agent and prints tool + final output.
@@ -529,6 +532,9 @@ func formatSnapshot(s ctxmgr.Snapshot) string {
 		}
 		b.WriteString(padCol(blue("API actual"), 14) + padCol("", 12) + padCol(blue(fmt.Sprint(s.ActualPromptTokens)), 8) +
 			gray(fmt.Sprintf("prompt_tokens  ratio=%.2f  Δ%s%d", ratio, sign, delta)) + "\n")
+	} else if s.RequestFailed {
+		b.WriteString(padCol(red("API actual"), 14) + padCol("", 12) + padCol(red("-"), 8) +
+			gray("(request failed — no usage)") + "\n")
 	}
 	return b.String()
 }

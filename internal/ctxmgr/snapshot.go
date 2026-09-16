@@ -50,6 +50,8 @@ type Snapshot struct {
 	ActualPromptTokens int `json:"actual_prompt_tokens,omitempty"`
 	// EstimateRatio is actual/estimate, learned from provider usage (1.0 until first sample).
 	EstimateRatio float64 `json:"estimate_ratio,omitempty"`
+	// RequestFailed marks that the LLM call for this snapshot failed (no usage).
+	RequestFailed bool `json:"request_failed,omitempty"`
 }
 
 // Summary returns a multi-line human-readable breakdown.

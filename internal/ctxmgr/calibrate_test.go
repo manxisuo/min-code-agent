@@ -86,3 +86,22 @@ func TestManagerObserveIgnoresInvalid(t *testing.T) {
 		t.Fatal("should ignore zero samples")
 	}
 }
+
+func TestMarkRequestFailed(t *testing.T) {
+	m := New("SYS", "", 10000)
+	m.AppendUser("hi")
+	m.BuildRequest(nil)
+	if m.LastSnapshot().RequestFailed {
+		t.Fatal("should not start failed")
+	}
+	m.MarkRequestFailed()
+	if !m.LastSnapshot().RequestFailed {
+		t.Fatal("expected request_failed")
+	}
+	// Successful observe clears the flag.
+	est := m.LastSnapshot().TotalTokens + m.LastSnapshot().ToolTokens
+	m.ObserveUsage(est, est+10)
+	if m.LastSnapshot().RequestFailed {
+		t.Fatal("should clear on success")
+	}
+}
