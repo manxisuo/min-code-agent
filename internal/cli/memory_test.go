@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mincode/mincode/internal/llm"
-	"github.com/mincode/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/observability"
 )
 
 func newMemoryApp(t *testing.T, withFile bool) *App {

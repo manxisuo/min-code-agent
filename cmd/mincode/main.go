@@ -11,7 +11,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/mincode/mincode/internal/cli"
+	"github.com/manxisuo/mincode/internal/cli"
 )
 
 func main() {

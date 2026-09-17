@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mincode/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/llm"
 )
 
 func TestSaveLoadRoundTrip(t *testing.T) {

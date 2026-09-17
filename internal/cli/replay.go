@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/mincode/mincode/internal/replay"
+	"github.com/manxisuo/mincode/internal/replay"
 )
 
 // runReplay starts the interactive trace player for a session id or path.

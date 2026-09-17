@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mincode/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/llm"
 )
 
 // Entry is one stored conversation message with provenance.

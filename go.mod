@@ -1,4 +1,4 @@
-module github.com/mincode/mincode
+module github.com/manxisuo/mincode
 
 go 1.27.1
 

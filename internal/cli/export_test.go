@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mincode/mincode/internal/ctxmgr"
-	"github.com/mincode/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/ctxmgr"
+	"github.com/manxisuo/mincode/internal/llm"
 )
 
 func TestRenderSessionMarkdown(t *testing.T) {

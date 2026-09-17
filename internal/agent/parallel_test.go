@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mincode/mincode/internal/llm"
-	"github.com/mincode/mincode/internal/observability"
-	"github.com/mincode/mincode/internal/tools"
+	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/tools"
 )
 
 func writeTestFile(ws *tools.Workspace, rel, content string) error {

@@ -19,17 +19,17 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/mincode/mincode/internal/agent"
-	"github.com/mincode/mincode/internal/config"
-	"github.com/mincode/mincode/internal/ctxmgr"
-	"github.com/mincode/mincode/internal/instruction"
-	"github.com/mincode/mincode/internal/llm"
-	"github.com/mincode/mincode/internal/memory"
-	"github.com/mincode/mincode/internal/observability"
-	"github.com/mincode/mincode/internal/plan"
-	"github.com/mincode/mincode/internal/session"
-	"github.com/mincode/mincode/internal/skill"
-	"github.com/mincode/mincode/internal/tools"
+	"github.com/manxisuo/mincode/internal/agent"
+	"github.com/manxisuo/mincode/internal/config"
+	"github.com/manxisuo/mincode/internal/ctxmgr"
+	"github.com/manxisuo/mincode/internal/instruction"
+	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/memory"
+	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/plan"
+	"github.com/manxisuo/mincode/internal/session"
+	"github.com/manxisuo/mincode/internal/skill"
+	"github.com/manxisuo/mincode/internal/tools"
 )
 
 // Options are runtime options from flags.

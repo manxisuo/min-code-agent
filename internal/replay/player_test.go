@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mincode/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/observability"
 )
 
 func writeTrace(t *testing.T, n int) string {

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mincode/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/llm"
 )
 
 // TestLongSessionCompressionKeepsPinned ensures a long tool-heavy conversation

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mincode/mincode/internal/experiment"
+	"github.com/manxisuo/mincode/internal/experiment"
 )
 
 // RunExperimentCLI dispatches `mincode experiment ...` subcommands.

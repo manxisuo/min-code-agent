@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mincode/mincode/internal/llm"
-	"github.com/mincode/mincode/internal/observability"
-	"github.com/mincode/mincode/internal/plan"
+	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/plan"
 )
 
 func newPlanApp(t *testing.T) *App {

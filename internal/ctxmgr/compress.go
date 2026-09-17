@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mincode/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/llm"
 )
 
 // DefaultCompressAtTokens triggers compaction when estimated history exceeds this.

@@ -6,10 +6,10 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/mincode/mincode/internal/llm"
-	"github.com/mincode/mincode/internal/memory"
-	"github.com/mincode/mincode/internal/observability"
-	"github.com/mincode/mincode/internal/permission"
+	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/memory"
+	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/permission"
 )
 
 const memoryExtractMaxRune = 8000

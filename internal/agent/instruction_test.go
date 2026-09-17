@@ -7,11 +7,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mincode/mincode/internal/instruction"
-	"github.com/mincode/mincode/internal/llm"
-	"github.com/mincode/mincode/internal/observability"
-	"github.com/mincode/mincode/internal/permission"
-	"github.com/mincode/mincode/internal/tools"
+	"github.com/manxisuo/mincode/internal/instruction"
+	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/permission"
+	"github.com/manxisuo/mincode/internal/tools"
 )
 
 func writeInstrFile(t *testing.T, path, content string) {

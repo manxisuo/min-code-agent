@@ -9,8 +9,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/mincode/mincode/internal/permission"
-	"github.com/mincode/mincode/internal/tools"
+	"github.com/manxisuo/mincode/internal/permission"
+	"github.com/manxisuo/mincode/internal/tools"
 )
 
 // StdinApprover asks y/n on the terminal for Ask-level tool calls.

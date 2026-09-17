@@ -6,7 +6,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/mincode/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/observability"
 )
 
 func TestColorPrompt(t *testing.T) {

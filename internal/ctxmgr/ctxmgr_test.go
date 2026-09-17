@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mincode/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/llm"
 )
 
 func TestEstimateTokens(t *testing.T) {

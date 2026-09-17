@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"github.com/mincode/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/observability"
 )
 
 // Player steps through a trace file interactively or programmatically.
