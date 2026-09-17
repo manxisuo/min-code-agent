@@ -1,5 +1,8 @@
 # Roadmap
 
+> **状态：Phase 0–12 已全部完成**（含 Hardening 修复、MVP 验收测试、Experiment 分布统计）。
+> 后续高级方向见文末，需另开计划。
+
 ## 总体原则
 
 路线图遵循：

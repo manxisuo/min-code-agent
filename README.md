@@ -4,6 +4,8 @@ Min Code Agent 是一个面向学习、实验和研究的轻量级 Code Agent Ru
 
 它的目标不是复制 Claude Code、Codex CLI、Cursor Agent 或 OpenCode，也不是追求功能数量，而是通过一个结构清晰、行为透明、可观测、可扩展的实现，理解现代 Code Agent 的核心工作机制。
 
+**当前状态：Roadmap Phase 0–12 已完成**，并包含 Hardening 修复与 MVP 验收测试。
+
 ## 核心目标
 
 项目围绕三个关键词设计：
@@ -48,12 +50,11 @@ Min Code Agent 是一个面向学习、实验和研究的轻量级 Code Agent Ru
 - 一次性支持所有 LLM Provider
 - 长时间完全自主运行的 Agent
 
-## 推荐技术栈
+## 技术栈
 
 ```text
 Language        Go
-CLI             Cobra 或标准 flag
-Logging         slog
+CLI             标准 flag
 Config          YAML
 Storage         JSON / JSONL
 Session         JSON
@@ -62,81 +63,88 @@ Testing         Go testing
 LLM             OpenAI-compatible API
 ```
 
-TUI 暂不作为 MVP 目标。后续如果 Inspector 需要更强交互，可考虑 Bubble Tea。
-
-## MVP 能力
-
-第一版 MVP 应包含：
+## 已实现能力（Phase 0–12）
 
 ```text
-CLI REPL
-OpenAI-compatible Provider
+CLI REPL / 单次执行 / --continue / replay
 
-Agent Loop
+OpenAI-compatible + Fake Provider
 
-read_file
-list_dir
-glob
-grep
-edit_file
-shell
+Agent Loop（状态机、loop detection、取消）
 
-Permission
+Tools:
+  read_file / list_dir / glob / grep
+  write_file / edit_file / shell
+  memory_add
 
-Basic Context
+Workspace 沙箱 + Permission（文件路径逃逸、危险 shell 拒绝）
 
-Event Bus
-Trace Recorder
-Timeline
-Context Snapshot
-Tool Inspector
-Basic Metrics
+Context:
+  token budget / snapshot / compression
+  Instructions (AGENTS.md 层级) / Skills / Memory
+
+Session 持久化、Trace JSONL、Timeline、Metrics
+
+Plan Mode（/plan 草稿 → approve → 逐步执行）
+
+Experiment Framework（run / list / show / compare，含 min/median/avg/max）
+
+会话导出 Markdown（/export）
 ```
 
-Min Code Agent 与普通练习型 Code Agent 最大的区别，是从 MVP 开始就包含 **Observation Layer**。
+与普通练习型 Code Agent 最大的区别：从第一天起就包含完整的 **Observation Layer**。
 
-## 使用示例
+## 快速开始
 
 ```bash
-mincode
+# 配置（mincode.yaml 或环境变量）
+export OPENAI_API_KEY=sk-...
+# mincode.yaml 中可设 provider.base_url / model 等
+
+go build -o mincode ./cmd/mincode
+./mincode ./my-project
 ```
 
-指定工作区：
+REPL 内常用命令：
 
-```bash
-mincode ./project
+```text
+/help
+/timeline          执行链
+/context           最近一次模型看到了什么
+/instructions      已加载的 AGENTS.md
+/skills  /skill <name>
+/memory  /memory add <fact>
+/plan <goal>       草稿计划 → /plan approve
+/export [path]     导出会话 Markdown
+/metrics
+/trace [n]
+/exit
 ```
 
-单次执行：
+单次执行与回放：
 
 ```bash
 mincode -p "分析这个项目"
-```
-
-Inspector 模式：
-
-```bash
-mincode --inspect
-```
-
-恢复会话：
-
-```bash
 mincode --continue
-```
-
-回放 Trace：
-
-```bash
 mincode replay <session-id>
 ```
+
+实验对比：
+
+```bash
+mincode experiment run --name model-a --task "说明 CLI 到 tool 的调用链" --model model-a --repeat 5
+mincode experiment run --name model-b --task "说明 CLI 到 tool 的调用链" --model model-b --repeat 5
+mincode experiment compare model-a model-b
+```
+
+结果写入 `<workspace>/.mincode/experiments/<name>/`。对比时优先看 **median**（均值易被 outlier 拉偏）。
 
 ## 典型执行流程
 
 ```text
 用户输入
     ↓
-Prompt / Instructions
+Prompt / Instructions / Skills / Memory
     ↓
 Context Construction
     ↓
@@ -150,9 +158,7 @@ Context Update
     ↓
 下一轮决策
     ↓
-代码修改
-    ↓
-测试验证
+代码修改 / 测试验证
     ↓
 最终回答
 ```
@@ -169,29 +175,25 @@ Min Code Agent 的目标不是只让 Agent “能工作”，而是让开发者�
 
 ## 文档
 
-- [架构设计](docs/architecture.md)
-- [可观测性设计](docs/observability.md)
-- [开发路线图](docs/roadmap.md)
+- [架构设计](architecture.md)
+- [可观测性设计](observability.md)
+- [开发路线图](roadmap.md)
 - [Agent 开发约束](AGENTS.md)
 
-## 第一阶段验收
+## 验收
 
-第一版应至少能稳定完成以下任务：
+Roadmap 中的 MVP Test 1–6 已固化为自动化测试：
 
-```text
-分析这个 Go 项目的入口和整体结构。
+```bash
+go test ./internal/cli/ -run TestMVP
 ```
 
-```text
-找出仓库中的所有 TODO。
-```
+覆盖：仓库分析、TODO 搜索、改代码、失败恢复、workspace 逃逸拒绝、危险命令拒绝。
 
-```text
-新增一个 /health 接口，并补测试。
-```
+## 开发
 
-```text
-运行测试；如果失败，根据错误修改代码后重新测试。
+```bash
+gofmt -w .
+go vet ./...
+go test ./...
 ```
-
-同时，开发者应能通过 Trace / Inspector 查看完整执行链，而不是只看到最终答案。
