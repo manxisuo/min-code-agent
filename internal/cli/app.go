@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -321,25 +322,48 @@ func (a *App) Run(ctx context.Context, opts Options) error {
 }
 
 // beginTurn returns a context for one REPL turn/plan execution.
-// Ctrl+C cancels only this context; the parent session context stays alive.
+// The REPL installs a process-wide SIGINT handler; this only creates a
+// cancellable child context so Ctrl+C can abort the in-flight turn.
 func beginTurn(parent context.Context) (context.Context, context.CancelFunc) {
 	turnCtx, cancel := context.WithCancel(parent)
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	done := make(chan struct{})
-	go func() {
-		select {
-		case <-sig:
-			cancel()
-		case <-done:
-		}
-	}()
+	return turnCtx, cancel
+}
+
+// turnGuard tracks whether a turn is in flight so SIGINT can either cancel it
+// or (when idle) just refresh the prompt without exiting the process.
+type turnGuard struct {
+	mu     sync.Mutex
+	cancel context.CancelFunc
+}
+
+func (g *turnGuard) begin(parent context.Context) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(parent)
+	g.mu.Lock()
+	g.cancel = cancel
+	g.mu.Unlock()
 	stop := func() {
-		signal.Stop(sig)
-		close(done)
-		cancel()
+		g.mu.Lock()
+		if g.cancel != nil {
+			g.cancel()
+			g.cancel = nil
+		}
+		g.mu.Unlock()
 	}
-	return turnCtx, stop
+	return ctx, stop
+}
+
+func (g *turnGuard) active() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.cancel != nil
+}
+
+func (g *turnGuard) cancelActive() {
+	g.mu.Lock()
+	if g.cancel != nil {
+		g.cancel()
+	}
+	g.mu.Unlock()
 }
 
 func (a *App) restoreLatestSession() error {
@@ -442,13 +466,45 @@ func (a *App) repl(ctx context.Context) error {
 
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "repl"})
 
-	in := bufio.NewScanner(os.Stdin)
-	in.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// One SIGINT handler for the whole REPL: cancel a running turn, or stay
+	// alive at the prompt (do not exit the process).
+	var guard turnGuard
+	var idleInterrupt atomic.Bool
+	sigCh := make(chan os.Signal, 8)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+	go func() {
+		for range sigCh {
+			if guard.active() {
+				guard.cancelActive()
+				continue
+			}
+			// Idle at the prompt: mark interrupt so a failed/aborted Scan
+			// does not look like EOF (Windows often returns Scan=false + nil err).
+			idleInterrupt.Store(true)
+			fmt.Fprintf(a.out, "\n^C\n")
+		}
+	}()
+
+	in := newStdinScanner()
 
 	for {
 		fmt.Fprint(a.out, promptString())
+		idleInterrupt.Store(false)
 		if !in.Scan() {
-			break
+			// Windows may deliver the console interrupt to the read before the
+			// signal goroutine sets the flag — wait briefly and re-check.
+			time.Sleep(20 * time.Millisecond)
+			if idleInterrupt.Load() {
+				in = newStdinScanner()
+				continue
+			}
+			if err := in.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+				fmt.Fprintf(a.out, "\n")
+				in = newStdinScanner()
+				continue
+			}
+			break // real EOF (Ctrl+Z / Ctrl+D)
 		}
 		line := strings.TrimSpace(in.Text())
 		if line == "" {
@@ -456,7 +512,7 @@ func (a *App) repl(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, "/") {
-			turnCtx, stopTurn := beginTurn(ctx)
+			turnCtx, stopTurn := guard.begin(ctx)
 			quit := a.handleCommand(turnCtx, line)
 			stopTurn()
 			if quit {
@@ -465,18 +521,21 @@ func (a *App) repl(ctx context.Context) error {
 			continue
 		}
 
-		turnCtx, stopTurn := beginTurn(ctx)
+		turnCtx, stopTurn := guard.begin(ctx)
 		err := a.runTurn(turnCtx, line)
 		stopTurn()
 		a.reportTurnError(err)
 		a.saveSession()
 	}
 
-	if err := in.Err(); err != nil {
-		return err
-	}
 	a.emit(observability.EventAgentFinished, observability.AgentLifecycleData{Reason: "repl exit"})
 	return nil
+}
+
+func newStdinScanner() *bufio.Scanner {
+	in := bufio.NewScanner(os.Stdin)
+	in.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	return in
 }
 
 func (a *App) toolNames() []string {

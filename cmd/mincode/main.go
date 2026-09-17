@@ -8,12 +8,27 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/mincode/mincode/internal/cli"
 )
 
 func main() {
 	enableVirtualTerminal()
+
+	// Install the Windows console Ctrl+C handler before any stdin read so
+	// the process is not terminated by the default handler. The REPL does
+	// the real work (cancel turn / refresh prompt); this early Notify only
+	// keeps the process alive until then.
+	early := make(chan os.Signal, 1)
+	signal.Notify(early, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(early)
+	go func() {
+		for range early {
+			// Discard; REPL installs its own handler and also receives a copy.
+		}
+	}()
 
 	opts := cli.Options{}
 	flag.StringVar(&opts.ConfigPath, "config", "", "path to mincode.yaml")
