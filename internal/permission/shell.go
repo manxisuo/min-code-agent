@@ -72,7 +72,21 @@ var shellDenyPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\bdrop\s+table\b`),
 	regexp.MustCompile(`(?i)\bcurl\s+[^|]*\|\s*(sh|bash|zsh)\b`),
 	regexp.MustCompile(`(?i)\bwget\s+[^|]*\|\s*(sh|bash|zsh)\b`),
+	// Workspace escape: shell cwd is sandboxed, but the command text is not.
+	// File tools reject "../"; shell must not silently allow the same escape.
+	regexp.MustCompile(`(?i)(^|[\s&|;])cd\s+(\.\.)([\s&|;]|$)`),
+	regexp.MustCompile(`\.\.[\\/]`),
+	regexp.MustCompile(`(^|[\s"'` + "`" + `])\.\.([\s"'` + "`" + `]|$)`),
 }
+
+// pathishAllowPrefixes take filesystem arguments; absolute paths outside the
+// workspace must not be auto-approved even if the verb is "read-only".
+var pathishAllowPrefixes = []string{
+	"cat", "head", "tail", "type", "find", "grep", "rg", "ls", "dir", "less", "more",
+}
+
+// absPathPattern flags absolute paths in a command (unix or windows).
+var absPathPattern = regexp.MustCompile(`(?i)(^|\s)(/[^\s]+|[a-z]:[\\/][^\s]*)`)
 
 // ClassifyShell maps a shell command line to Allow / Ask / Deny.
 func ClassifyShell(command string) Level {
@@ -83,7 +97,7 @@ func ClassifyShell(command string) Level {
 	lower := strings.ToLower(cmd)
 
 	for _, re := range shellDenyPatterns {
-		if re.MatchString(lower) {
+		if re.MatchString(lower) || re.MatchString(cmd) {
 			return Deny
 		}
 	}
@@ -92,11 +106,24 @@ func ClassifyShell(command string) Level {
 	flat := strings.Join(strings.Fields(lower), " ")
 	for _, p := range shellAllowPrefixes {
 		if flat == p || strings.HasPrefix(flat, p+" ") {
+			// Path-taking verbs with absolute paths require explicit approval.
+			if isPathishPrefix(p) && absPathPattern.MatchString(flat) {
+				return Ask
+			}
 			return Allow
 		}
 	}
 
 	return Ask
+}
+
+func isPathishPrefix(p string) bool {
+	for _, x := range pathishAllowPrefixes {
+		if p == x {
+			return true
+		}
+	}
+	return false
 }
 
 // Evaluate for DefaultPolicy already handles tool-name levels.

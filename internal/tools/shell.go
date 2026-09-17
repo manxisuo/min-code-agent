@@ -27,7 +27,7 @@ type Shell struct {
 func (t *Shell) Name() string { return "shell" }
 
 func (t *Shell) Description() string {
-	return "Run a shell command in the workspace (Windows: cmd.exe; Unix: /bin/sh). Capture stdout/stderr/exit code. Prefer read_file/list_dir/grep over shell for reading files. On Windows do not use wc/head/cat/ls — use dir/type/findstr."
+	return "Run a shell command in the workspace working directory (Windows: cmd.exe; Unix: /bin/sh). Capture stdout/stderr/exit code. Prefer read_file/list_dir/grep over shell for reading files. Do not use path traversal (../) or absolute paths outside the workspace — those are denied or require approval. On Windows do not use wc/head/cat/ls — use dir/type/findstr."
 }
 
 func (t *Shell) Schema() JSONSchema {

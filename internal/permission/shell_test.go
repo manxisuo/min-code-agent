@@ -46,6 +46,57 @@ func TestClassifyShellAsk(t *testing.T) {
 	}
 }
 
+func TestClassifyShellDenyPathEscape(t *testing.T) {
+	for _, c := range []string{
+		"cat ../../etc/passwd",
+		"cat ../secret",
+		"type ..\\..\\windows\\win.ini",
+		"cd ..",
+		"cd .. && dir",
+		"grep -r foo ../outside",
+		"head ../secrets.txt",
+		"ls ../..",
+	} {
+		if got := ClassifyShell(c); got != Deny {
+			t.Fatalf("%q => %v, want deny", c, got)
+		}
+	}
+}
+
+func TestClassifyShellAbsolutePathRequiresAsk(t *testing.T) {
+	for _, c := range []string{
+		"cat /etc/passwd",
+		"type C:\\Windows\\win.ini",
+		"grep secret /home/user/.ssh/id_rsa",
+	} {
+		if got := ClassifyShell(c); got != Ask {
+			t.Fatalf("%q => %v, want ask", c, got)
+		}
+	}
+}
+
+func TestClassifyShellAllowStillWorks(t *testing.T) {
+	for _, c := range []string{
+		"go test ./...",
+		"cat README.md",
+		"type README.md",
+		"ls -la",
+		"dir src",
+		"grep TODO .",
+	} {
+		if got := ClassifyShell(c); got != Allow {
+			t.Fatalf("%q => %v, want allow", c, got)
+		}
+	}
+}
+
+func TestShellAwarePolicyEscape(t *testing.T) {
+	p := &ShellAwarePolicy{Inner: NewDefaultPolicy()}
+	if p.Evaluate(Request{Tool: "shell", Arguments: `{"command":"cat ../../secret"}`}) != Deny {
+		t.Fatal("shell path escape must deny")
+	}
+}
+
 func TestShellAwarePolicy(t *testing.T) {
 	p := &ShellAwarePolicy{Inner: NewDefaultPolicy()}
 
