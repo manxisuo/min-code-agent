@@ -45,21 +45,22 @@ type Options struct {
 
 // App wires config, provider, agent, observability and the REPL.
 type App struct {
-	cfg       config.Config
-	provider  llm.Provider
-	agent     *agent.Agent
-	bus       *observability.Bus
-	recorder  *observability.Recorder
-	metrics   *observability.MetricsCollector
-	sessions  *session.Store
-	sessionID string
-	workspace string
-	instr     *instruction.Loader
-	skills    *skill.Loader
-	mem       *memory.Store
-	plans     *plan.Manager
-	out       io.Writer
-	echoTools atomic.Bool
+	cfg        config.Config
+	provider   llm.Provider
+	agent      *agent.Agent
+	bus        *observability.Bus
+	recorder   *observability.Recorder
+	metrics    *observability.MetricsCollector
+	sessions   *session.Store
+	sessionID  string
+	workspace  string
+	instr      *instruction.Loader
+	skills     *skill.Loader
+	mem        *memory.Store
+	plans      *plan.Manager
+	lastResult *agent.Result
+	out        io.Writer
+	echoTools  atomic.Bool
 }
 
 // NewApp constructs the application from options.
@@ -243,6 +244,37 @@ func (a *App) SessionID() string { return a.sessionID }
 
 // TracePath returns the current JSONL trace path.
 func (a *App) TracePath() string { return a.recorder.Path() }
+
+// MetricsSnapshot returns aggregated LLM metrics for this session.
+func (a *App) MetricsSnapshot() observability.Metrics {
+	if a.metrics == nil {
+		return observability.Metrics{}
+	}
+	return a.metrics.Snapshot()
+}
+
+// ProviderInfo returns the active provider name and model.
+func (a *App) ProviderInfo() (provider, model string) {
+	if a.provider == nil {
+		return "", ""
+	}
+	return a.provider.Name(), a.provider.Model()
+}
+
+// SetOutput redirects REPL/turn stdout (used by experiments).
+func (a *App) SetOutput(w io.Writer) {
+	if w != nil {
+		a.out = w
+	}
+}
+
+// RunPrompt executes a single-shot turn without entering the REPL.
+func (a *App) RunPrompt(ctx context.Context, prompt string) error {
+	return a.singleShot(ctx, prompt)
+}
+
+// LastResult is the agent.Result from the most recent RunPrompt/turn, if any.
+func (a *App) LastResult() *agent.Result { return a.lastResult }
 
 func (a *App) emit(typ observability.EventType, data any) {
 	a.bus.Publish(observability.NewEvent(a.sessionID, 0, typ, data))
@@ -434,6 +466,7 @@ func countUserTurns(entries []session.Entry) int {
 func (a *App) singleShot(ctx context.Context, prompt string) error {
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "single-shot"})
 	res, err := a.agent.Run(ctx, prompt)
+	a.lastResult = res
 	a.saveSession()
 	if err != nil {
 		a.emit(observability.EventAgentFailed, observability.AgentLifecycleData{Reason: err.Error()})

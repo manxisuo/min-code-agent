@@ -1,6 +1,6 @@
 // mincode is a learning-oriented Code Agent runtime.
 //
-// Phase 0–6: CLI REPL, providers, tools, context inspector, session, replay.
+// Phase 0–12: CLI REPL, providers, tools, context, session, skills, plan, memory, experiments.
 package main
 
 import (
@@ -18,17 +18,19 @@ func main() {
 	enableVirtualTerminal()
 
 	// Install the Windows console Ctrl+C handler before any stdin read so
-	// the process is not terminated by the default handler. The REPL does
-	// the real work (cancel turn / refresh prompt); this early Notify only
-	// keeps the process alive until then.
+	// the process is not terminated by the default handler.
 	early := make(chan os.Signal, 1)
 	signal.Notify(early, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(early)
 	go func() {
 		for range early {
-			// Discard; REPL installs its own handler and also receives a copy.
 		}
 	}()
+
+	// Batch experiment mode: mincode experiment run|list|show|compare
+	if len(os.Args) > 1 && os.Args[1] == "experiment" {
+		os.Exit(cli.RunExperimentCLI(os.Args[2:], os.Stdout))
+	}
 
 	opts := cli.Options{}
 	flag.StringVar(&opts.ConfigPath, "config", "", "path to mincode.yaml")
@@ -48,6 +50,7 @@ Usage:
   mincode <workspace-dir> [flags]
   mincode replay <session-id>
   mincode --replay <session-id|.jsonl>
+  mincode experiment run|list|show|compare
 
 Flags:
 `)
@@ -60,6 +63,7 @@ Examples:
   mincode -p "hello"
   mincode --replay 20260916-161234-d6b990c3
   mincode --provider fake -p "offline demo"
+  mincode experiment run --name base --task "分析入口" --provider fake --repeat 2
 
 Config resolution (when -config is omitted):
   <workspace>/mincode.yaml → <workspace>/mincode.yml → ./mincode.yaml
@@ -67,8 +71,11 @@ Config resolution (when -config is omitted):
 Sessions:
   Saved to <workspace>/.mincode/sessions/<id>.json after each turn
 
+Experiments:
+  Results in <workspace>/.mincode/experiments/<name>/
+
 REPL commands:
-  /help  /timeline  /context  /trace [n]  /metrics  /clear  /exit
+  /help  /timeline  /context  /trace [n]  /metrics  /export  /exit
 `)
 	}
 	flag.Parse()
