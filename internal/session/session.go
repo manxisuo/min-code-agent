@@ -120,7 +120,10 @@ func (s *Store) List() ([]Record, error) {
 		out = append(out, *rec)
 	}
 	sort.Slice(out, func(i, j int) bool {
-		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+		if !out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+		}
+		return out[i].ID < out[j].ID
 	})
 	return out, nil
 }

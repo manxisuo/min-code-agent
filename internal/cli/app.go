@@ -20,6 +20,7 @@ import (
 	"github.com/mincode/mincode/internal/agent"
 	"github.com/mincode/mincode/internal/config"
 	"github.com/mincode/mincode/internal/ctxmgr"
+	"github.com/mincode/mincode/internal/instruction"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
 	"github.com/mincode/mincode/internal/session"
@@ -48,6 +49,7 @@ type App struct {
 	sessions  *session.Store
 	sessionID string
 	workspace string
+	instr     *instruction.Loader
 	out       io.Writer
 	echoTools atomic.Bool
 }
@@ -120,6 +122,13 @@ func NewApp(opts Options) (*App, error) {
 	sysPrompt := cfg.Agent.SystemPrompt + config.PlatformShellHint(runtime.GOOS)
 	ag := agent.NewWithCompress(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, sysPrompt, cfg.Agent.TokenBudget, cfg.Agent.CompressAt)
 
+	instrLoader, err := instruction.NewLoader(workspace)
+	if err != nil {
+		_ = recorder.Close()
+		return nil, err
+	}
+	ag.Instr = instrLoader
+
 	sessions := session.NewStore(session.DefaultDir(workspace))
 
 	app := &App{
@@ -132,6 +141,7 @@ func NewApp(opts Options) (*App, error) {
 		sessions:  sessions,
 		sessionID: sessionID,
 		workspace: workspace,
+		instr:     instrLoader,
 		out:       os.Stdout,
 	}
 
@@ -154,6 +164,8 @@ func NewApp(opts Options) (*App, error) {
 		Model:     provider.Model(),
 		Provider:  provider.Name(),
 	})
+
+	app.loadRootInstructions()
 	return app, nil
 }
 
@@ -193,6 +205,32 @@ func (a *App) TracePath() string { return a.recorder.Path() }
 
 func (a *App) emit(typ observability.EventType, data any) {
 	a.bus.Publish(observability.NewEvent(a.sessionID, 0, typ, data))
+}
+
+// loadRootInstructions loads workspace/AGENTS.md and pushes it into context.
+func (a *App) loadRootInstructions() {
+	if a.instr == nil {
+		return
+	}
+	f, err := a.instr.LoadRoot()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mincode: load %s: %v\n", instruction.FileName, err)
+		return
+	}
+	if f == nil {
+		return
+	}
+	a.emitInstructionLoaded(f)
+	a.agent.Ctx.SetInstructions(a.instr.Compose())
+}
+
+func (a *App) emitInstructionLoaded(f *instruction.File) {
+	a.emit(observability.EventInstructionLoaded, observability.InstructionLoadedData{
+		Path:    f.Path,
+		RelPath: f.RelPath,
+		RelDir:  f.RelDir,
+		Bytes:   len(f.Content),
+	})
 }
 
 // Run starts the app: replay / single-shot / continue+REPL / REPL.
@@ -296,6 +334,9 @@ func (a *App) repl(ctx context.Context) error {
 	fmt.Fprintf(a.out, "%s  %s  %s\n", bannerLine("provider", a.provider.Name()), bannerLine("model", a.provider.Model()), bannerLine("workspace", a.workspace))
 	fmt.Fprintf(a.out, "%s\n", bannerLine("tools", strings.Join(a.toolNames(), ", ")))
 	fmt.Fprintf(a.out, "%s\n", bannerLine("trace", a.recorder.Path()))
+	if n := a.instr.Count(); n > 0 {
+		fmt.Fprintf(a.out, "%s\n", bannerLine("instructions", fmt.Sprintf("%d AGENTS.md loaded", n)))
+	}
 	fmt.Fprintf(a.out, "Type a message, or %s for commands.\n\n", bold("/help"))
 
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "repl"})
@@ -469,6 +510,7 @@ func (a *App) handleCommand(line string) (quit bool) {
   /help              show this help
   /timeline          show agent execution timeline
   /context           show last context snapshot (what the model saw)
+  /instructions      show loaded AGENTS.md project instructions
   /trace [n]         show last n raw trace events (default 30)
   /metrics           show session token/time metrics
   /clear             clear conversation history
@@ -481,6 +523,8 @@ Trace file:
 		a.printTimeline()
 	case "/context":
 		a.printContextSnapshot()
+	case "/instructions":
+		a.printInstructions()
 	case "/trace":
 		n := 30
 		if len(fields) > 1 {
@@ -551,6 +595,42 @@ func (a *App) printContextSnapshot() {
 	}
 	fmt.Fprintln(a.out)
 	fmt.Fprint(a.out, formatSnapshot(*snap))
+	fmt.Fprintln(a.out)
+}
+
+// printInstructions shows every AGENTS.md currently loaded into context.
+func (a *App) printInstructions() {
+	fmt.Fprintln(a.out)
+	if a.instr == nil || a.instr.Count() == 0 {
+		fmt.Fprint(a.out, yellow("no project instructions loaded")+" — add "+bold(instruction.FileName)+" under the workspace\n\n")
+		return
+	}
+	files := a.instr.Files()
+	fmt.Fprintf(a.out, "%s  %s\n\n", bold("Project Instructions"),
+		gray(fmt.Sprintf("%d file(s)  workspace=%s", len(files), a.workspace)))
+	for _, f := range files {
+		src := green(f.RelPath)
+		if f.RelDir == "." {
+			src = bold(green(f.RelPath))
+		}
+		fmt.Fprintf(a.out, "%s  %s\n", padCol(src, 40), gray(fmt.Sprintf("%d bytes", len(f.Content))))
+		// Show a short preview of each file body.
+		preview := f.Content
+		if lines := strings.Split(preview, "\n"); len(lines) > 6 {
+			preview = strings.Join(lines[:6], "\n") + "\n…"
+		}
+		for _, line := range strings.Split(preview, "\n") {
+			fmt.Fprintf(a.out, "  %s\n", dim(line))
+		}
+		fmt.Fprintln(a.out)
+	}
+	composed := a.agent.Ctx.Instructions()
+	if composed != "" {
+		// Token estimate lives in the next context build; show char size here.
+		fmt.Fprintf(a.out, "%s  %s\n",
+			padCol(cyan("Composed"), 14),
+			gray(fmt.Sprintf("%d chars injected as system context", len(composed))))
+	}
 	fmt.Fprintln(a.out)
 }
 
@@ -766,6 +846,10 @@ func timelineLine(e observability.Event) (string, bool) {
 	case observability.EventLoopDetected:
 		data := mapFromAny(e.Data)
 		return fmt.Sprintf("%s  %s %v x%v", ts, red("Loop Detected"), data["tool"], data["count"]), true
+	case observability.EventInstructionLoaded:
+		data := mapFromAny(e.Data)
+		rel, _ := data["rel_path"].(string)
+		return fmt.Sprintf("%s  %s %s", ts, magenta("Instructions"), bold(rel)), true
 	}
 	return "", false
 }
@@ -856,6 +940,8 @@ func formatEvent(e observability.Event) string {
 		return fmt.Sprintf("%s  %v  %v bytes  %vms %s", base, data["tool"], data["result_size"], data["duration_ms"], errPart)
 	case observability.EventToolFailed:
 		return fmt.Sprintf("%s  %v  %v", base, data["tool"], red(fmt.Sprint(data["error"])))
+	case observability.EventInstructionLoaded:
+		return fmt.Sprintf("%s  %v  %v bytes", base, data["rel_path"], data["bytes"])
 	}
 	return base
 }
@@ -875,6 +961,8 @@ func paintEventType(typ string) string {
 	case strings.HasPrefix(typ, "permission."):
 		return yellow(typ)
 	case strings.HasPrefix(typ, "file."):
+		return magenta(typ)
+	case typ == "instruction.loaded":
 		return magenta(typ)
 	case strings.HasPrefix(typ, "llm."):
 		return magenta(typ)

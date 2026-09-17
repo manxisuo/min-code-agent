@@ -38,6 +38,8 @@ const (
 
 	EventFileChanged EventType = "file.changed"
 
+	EventInstructionLoaded EventType = "instruction.loaded"
+
 	EventLoopDetected EventType = "loop.detected"
 )
 
@@ -161,4 +163,13 @@ type FileChangedData struct {
 	Operation string `json:"operation"` // created | overwrote | edit
 	Bytes     int    `json:"bytes,omitempty"`
 	Diff      string `json:"diff,omitempty"`
+}
+
+// InstructionLoadedData is payload for instruction.loaded.
+type InstructionLoadedData struct {
+	Path    string `json:"path"`
+	RelPath string `json:"rel_path"`
+	RelDir  string `json:"rel_dir"`
+	Bytes   int    `json:"bytes"`
+	Content string `json:"content,omitempty"`
 }

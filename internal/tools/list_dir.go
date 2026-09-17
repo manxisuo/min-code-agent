@@ -97,10 +97,14 @@ func (t *ListDir) Execute(ctx context.Context, raw json.RawMessage) (Result, err
 		b.WriteString("(empty directory)\n")
 	}
 
+	metaPath := args.Path
+	if metaPath == "" {
+		metaPath = "."
+	}
 	return Result{
 		Content: b.String(),
 		Meta: map[string]any{
-			"path":    args.Path,
+			"path":    metaPath,
 			"entries": len(entries),
 		},
 	}, nil

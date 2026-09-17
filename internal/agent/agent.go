@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/mincode/mincode/internal/ctxmgr"
+	"github.com/mincode/mincode/internal/instruction"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
 	"github.com/mincode/mincode/internal/permission"
@@ -54,6 +55,9 @@ type Agent struct {
 	// Ctx builds budgeted prompts and keeps conversation state.
 	Ctx   *ctxmgr.Manager
 	State State
+
+	// Instr loads hierarchical AGENTS.md instructions (optional).
+	Instr *instruction.Loader
 }
 
 // New creates an agent with a context manager.
@@ -363,6 +367,8 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 		}
 	}
 
+	a.loadInstructionsForTool(tc, result)
+
 	preview := result.Content
 	if len(preview) > toolPreviewLen {
 		preview = truncatePreview(preview, toolPreviewLen)
@@ -380,6 +386,53 @@ func (a *Agent) executeTool(ctx context.Context, tc llm.ToolCall) (tools.Result,
 	}
 	a.emit(observability.EventToolFinished, data)
 	return result, nil
+}
+
+// loadInstructionsForTool pulls in AGENTS.md for directories the tool just
+// touched, so nested project rules enter the next context build.
+func (a *Agent) loadInstructionsForTool(tc llm.ToolCall, result tools.Result) {
+	if a.Instr == nil || result.IsError {
+		return
+	}
+	var path string
+	if p, ok := result.Meta["path"].(string); ok && p != "" {
+		path = p
+	} else {
+		path = pathFromArgs(tc.Arguments)
+	}
+	if path == "" {
+		if tc.Name == "list_dir" {
+			path = "."
+		} else {
+			return
+		}
+	}
+	added, err := a.Instr.LoadForPath(path)
+	if err != nil || len(added) == 0 {
+		return
+	}
+	for _, f := range added {
+		a.emit(observability.EventInstructionLoaded, observability.InstructionLoadedData{
+			Path:    f.Path,
+			RelPath: f.RelPath,
+			RelDir:  f.RelDir,
+			Bytes:   len(f.Content),
+		})
+	}
+	a.Ctx.SetInstructions(a.Instr.Compose())
+}
+
+// pathFromArgs extracts a "path" field from a tool-arguments JSON object.
+func pathFromArgs(args string) string {
+	if args == "" {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(args), &m); err != nil {
+		return ""
+	}
+	p, _ := m["path"].(string)
+	return p
 }
 
 func summarizeToolCall(name, args string) string {

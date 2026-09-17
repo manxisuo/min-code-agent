@@ -148,3 +148,81 @@ func TestContextSnapshotCommand(t *testing.T) {
 		t.Fatalf("snapshot = %q", out)
 	}
 }
+
+func TestInstructionsLoadedAtStartup(t *testing.T) {
+	wsDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(wsDir, "AGENTS.md"), []byte("# Project\nAlways cite paths.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(wsDir, "svc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "svc", "AGENTS.md"), []byte("svc rules\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wsDir, "svc", "a.txt"), []byte("hi\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	traceDir := t.TempDir()
+	cfgPath := filepath.Join(t.TempDir(), "mincode.yaml")
+	yaml := "provider:\n  type: fake\n  model: fake-model\ntrace:\n  dir: " + filepath.ToSlash(traceDir) + "\n"
+	if err := os.WriteFile(cfgPath, []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	app, err := NewApp(Options{ConfigPath: cfgPath, Workspace: wsDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+
+	if !strings.Contains(app.agent.Ctx.Instructions(), "Always cite paths") {
+		t.Fatalf("root instructions not in context: %q", app.agent.Ctx.Instructions())
+	}
+
+	var buf bytes.Buffer
+	app.out = &buf
+	app.handleCommand("/instructions")
+	out := buf.String()
+	if !strings.Contains(out, "AGENTS.md") || !strings.Contains(out, "Always cite paths") {
+		t.Fatalf("instructions cmd = %q", out)
+	}
+
+	// Touch a nested file so nested AGENTS.md joins context.
+	fake := &llm.FakeProvider{
+		Responses: []llm.ChatResponse{
+			{ToolCalls: []llm.ToolCall{{
+				ID: "1", Name: "read_file", Arguments: `{"path":"svc/a.txt"}`,
+			}}},
+			{Content: "ok"},
+		},
+	}
+	app.agent.Provider = fake
+	if err := app.runTurn(context.Background(), "read svc"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(app.agent.Ctx.Instructions(), "svc rules") {
+		t.Fatalf("nested instructions missing: %q", app.agent.Ctx.Instructions())
+	}
+
+	events, err := observability.ReadEvents(app.TracePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	loads := 0
+	for _, e := range events {
+		if e.Type == observability.EventInstructionLoaded {
+			loads++
+		}
+	}
+	if loads < 2 {
+		t.Fatalf("instruction.loaded events = %d, want >= 2", loads)
+	}
+
+	buf.Reset()
+	app.handleCommand("/timeline")
+	if !strings.Contains(buf.String(), "Instructions") {
+		t.Fatalf("timeline missing instructions: %q", buf.String())
+	}
+}

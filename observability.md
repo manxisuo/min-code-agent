@@ -99,12 +99,13 @@ permission.denied
 session.created
 session.saved
 session.restored
+
+instruction.loaded
 ```
 
 后续可以扩展：
 
 ```text
-instruction.loaded
 skill.loaded
 memory.retrieved
 loop.detected
