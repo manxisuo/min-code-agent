@@ -52,6 +52,12 @@ type Agent struct {
 	Policy   permission.Policy
 	Approver permission.Approver
 
+	// ParallelTools enables concurrent execution of consecutive read-only
+	// tool calls returned in a single LLM response.
+	ParallelTools bool
+	// MaxParallel caps concurrent read-only tools (default 4).
+	MaxParallel int
+
 	// Ctx builds budgeted prompts and keeps conversation state.
 	Ctx   *ctxmgr.Manager
 	State State
@@ -73,14 +79,16 @@ func NewWithCompress(provider llm.Provider, reg *tools.Registry, bus *observabil
 	mgr := ctxmgr.New(systemPrompt, "", tokenBudget)
 	mgr.SetCompressAt(compressAt)
 	return &Agent{
-		Provider:  provider,
-		Tools:     reg,
-		Bus:       bus,
-		SessionID: sessionID,
-		MaxSteps:  maxSteps,
-		Policy:    &permission.ShellAwarePolicy{Inner: permission.NewDefaultPolicy()},
-		Ctx:       mgr,
-		State:     StateIdle,
+		Provider:      provider,
+		Tools:         reg,
+		Bus:           bus,
+		SessionID:     sessionID,
+		MaxSteps:      maxSteps,
+		Policy:        &permission.ShellAwarePolicy{Inner: permission.NewDefaultPolicy()},
+		ParallelTools: true,
+		MaxParallel:   defaultMaxParallel,
+		Ctx:           mgr,
+		State:         StateIdle,
 	}
 }
 
@@ -221,9 +229,8 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 			ToolCalls: resp.ToolCalls,
 		})
 
+		// Loop detection across the whole response before any execution.
 		for _, tc := range resp.ToolCalls {
-			toolCalls++
-
 			key := tc.Name + "\x00" + tc.Arguments
 			if key == lastKey {
 				repeats++
@@ -240,19 +247,16 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 				a.setState(StateFailed)
 				return &Result{State: StateFailed}, fmt.Errorf("%w: %s x%d", LoopDetected, tc.Name, repeats)
 			}
+		}
 
-			a.setState(StateExecutingTool)
-			result, execErr := a.executeTool(ctx, tc)
-			if execErr != nil {
-				if errors.Is(execErr, context.Canceled) || errors.Is(execErr, context.DeadlineExceeded) {
-					a.setState(StateCancelled)
-					a.Ctx.DropLastUser()
-					return nil, execErr
-				}
-				result = tools.Result{Content: execErr.Error(), IsError: true}
+		toolCalls += len(resp.ToolCalls)
+		_, execErr := a.executeToolCalls(ctx, resp.ToolCalls)
+		if execErr != nil {
+			if isCancelErr(execErr) {
+				a.setState(StateCancelled)
+				a.Ctx.DropLastUser()
+				return nil, execErr
 			}
-
-			a.Ctx.AppendToolResult(tc.ID, result.Content)
 		}
 	}
 

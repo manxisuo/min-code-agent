@@ -17,6 +17,9 @@ agent:
   token_budget: 32000
   # History compaction threshold (estimated tokens). 0 uses default 18000; set -1 to disable.
   compress_at: 18000
+  # Concurrent read-only tool calls (read_file/list_dir/glob/grep) in one LLM response.
+  parallel_tools: true
+  max_parallel: 4
 
 trace:
   dir: .mincode/traces

@@ -1,7 +1,7 @@
 # Roadmap
 
 > **状态：Phase 0–12 已全部完成**（含 Hardening 修复、MVP 验收测试、Experiment 分布统计）。
-> 后续高级方向见文末，需另开计划。
+> 高级方向中 **Parallel Tool Calls** 已落地；其余见文末，需另开计划。
 
 ## 总体原则
 
@@ -407,7 +407,7 @@ Failures
 基础版本稳定后再考虑：
 
 ```text
-Parallel Tool Calls
+Parallel Tool Calls     ✅ 已实现（Phase 13）
 Repository Map
 Semantic Code Search
 RAG
@@ -421,6 +421,40 @@ Plan-and-Execute
 ```
 
 任何新增能力都必须同步设计对应可观测能力。
+
+---
+
+## Phase 13：Parallel Tool Calls（已实现）
+
+### 目标
+
+模型在一次响应中返回多个只读工具调用时并发执行，缩短探索路径耗时。
+
+### 实现要点
+
+```text
+连续 read_file / list_dir / glob / grep → 并行 batch
+write_file / edit_file / shell / unknown → 保持串行
+需要交互审批的调用 → 回退串行
+结果按原 tool_call 顺序写回 Context
+```
+
+### 可观测
+
+```text
+tool.batch_started / tool.batch_finished
+tool.* 事件带 parallel / call_id / index
+/metrics: Parallel Batches / Parallel Tools
+Timeline: Batch Start / Batch Done
+```
+
+### 配置
+
+```yaml
+agent:
+  parallel_tools: true
+  max_parallel: 4
+```
 
 ---
 

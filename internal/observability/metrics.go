@@ -14,6 +14,10 @@ type Metrics struct {
 	TotalTokens  int
 	LLMDuration  time.Duration
 	Errors       int
+	// ParallelBatches counts tool.batch_started events with parallel=true.
+	ParallelBatches int
+	// ParallelToolCalls counts tool.* events flagged parallel.
+	ParallelToolCalls int
 }
 
 // MetricsCollector folds events into Metrics. Safe for sequential bus delivery.
@@ -42,6 +46,14 @@ func (c *MetricsCollector) Handle(e Event) {
 		if data, ok := asLLMData(e.Data); ok {
 			c.m.LLMDuration += time.Duration(data.DurationMS) * time.Millisecond
 		}
+	case EventToolBatchStarted:
+		if data, ok := asBatchData(e.Data); ok && data.Parallel {
+			c.m.ParallelBatches++
+		}
+	case EventToolStarted:
+		if data, ok := asToolData(e.Data); ok && data.Parallel {
+			c.m.ParallelToolCalls++
+		}
 	}
 }
 
@@ -60,6 +72,8 @@ func (m Metrics) Format() string {
 	fmt.Fprintf(&b, "Output Tokens    %s\n", formatInt(m.OutputTokens))
 	fmt.Fprintf(&b, "Total Tokens     %s\n", formatInt(m.TotalTokens))
 	fmt.Fprintf(&b, "LLM Time         %s\n", m.LLMDuration.Round(time.Millisecond))
+	fmt.Fprintf(&b, "Parallel Batches %d\n", m.ParallelBatches)
+	fmt.Fprintf(&b, "Parallel Tools   %d\n", m.ParallelToolCalls)
 	return b.String()
 }
 
@@ -116,4 +130,46 @@ func intFromAny(v any) int {
 		return int(n)
 	}
 	return 0
+}
+
+func asBatchData(v any) (ToolBatchData, bool) {
+	switch d := v.(type) {
+	case ToolBatchData:
+		return d, true
+	case *ToolBatchData:
+		if d == nil {
+			return ToolBatchData{}, false
+		}
+		return *d, true
+	case map[string]any:
+		out := ToolBatchData{}
+		out.Size = intFromAny(d["size"])
+		if b, ok := d["parallel"].(bool); ok {
+			out.Parallel = b
+		}
+		return out, true
+	}
+	return ToolBatchData{}, false
+}
+
+func asToolData(v any) (ToolEventData, bool) {
+	switch d := v.(type) {
+	case ToolEventData:
+		return d, true
+	case *ToolEventData:
+		if d == nil {
+			return ToolEventData{}, false
+		}
+		return *d, true
+	case map[string]any:
+		out := ToolEventData{}
+		if s, ok := d["tool"].(string); ok {
+			out.Tool = s
+		}
+		if b, ok := d["parallel"].(bool); ok {
+			out.Parallel = b
+		}
+		return out, true
+	}
+	return ToolEventData{}, false
 }

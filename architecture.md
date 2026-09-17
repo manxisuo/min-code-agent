@@ -222,6 +222,9 @@ for step := 0; step < maxSteps; step++ {
 }
 ```
 
+连续只读工具（read_file / list_dir / glob / grep）可并行执行；
+写操作与 shell 保持串行。结果仍按原 tool_call 顺序写回 Context。
+
 必须支持：
 
 - max steps
@@ -231,6 +234,7 @@ for step := 0; step < maxSteps; step++ {
 - tool failure
 - permission rejection
 - basic loop detection
+- parallel read-only tool batches（可配置开关与并发上限）
 
 ## 6. Message Model
 

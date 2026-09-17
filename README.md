@@ -4,7 +4,7 @@ Min Code Agent 是一个面向学习、实验和研究的轻量级 Code Agent Ru
 
 它的目标不是复制 Claude Code、Codex CLI、Cursor Agent 或 OpenCode，也不是追求功能数量，而是通过一个结构清晰、行为透明、可观测、可扩展的实现，理解现代 Code Agent 的核心工作机制。
 
-**当前状态：Roadmap Phase 0–12 已完成**，并包含 Hardening 修复与 MVP 验收测试。
+**当前状态：Roadmap Phase 0–12 已完成**，并包含 Hardening 修复、MVP 验收测试，以及高级实验 **Parallel Tool Calls**。
 
 ## 核心目标
 
@@ -76,6 +76,8 @@ Tools:
   read_file / list_dir / glob / grep
   write_file / edit_file / shell
   memory_add
+
+Parallel Tool Calls（连续只读工具并行；写/Shell 保持串行）
 
 Workspace 沙箱 + Permission（文件路径逃逸、危险 shell 拒绝）
 

@@ -32,6 +32,9 @@ const (
 	EventToolFinished  EventType = "tool.finished"
 	EventToolFailed    EventType = "tool.failed"
 
+	EventToolBatchStarted  EventType = "tool.batch_started"
+	EventToolBatchFinished EventType = "tool.batch_finished"
+
 	EventPermissionRequested EventType = "permission.requested"
 	EventPermissionApproved  EventType = "permission.approved"
 	EventPermissionDenied    EventType = "permission.denied"
@@ -146,11 +149,26 @@ type CompactionData struct {
 type ToolEventData struct {
 	Tool          string `json:"tool"`
 	Arguments     string `json:"arguments,omitempty"`
+	CallID        string `json:"call_id,omitempty"`
+	Index         int    `json:"index,omitempty"`
+	Parallel      bool   `json:"parallel,omitempty"`
 	DurationMS    int64  `json:"duration_ms,omitempty"`
 	ResultSize    int    `json:"result_size,omitempty"`
 	IsError       bool   `json:"is_error,omitempty"`
 	Error         string `json:"error,omitempty"`
 	OutputPreview string `json:"output_preview,omitempty"`
+}
+
+// ToolBatchData is payload for tool.batch_* events.
+type ToolBatchData struct {
+	Size       int      `json:"size"`
+	Parallel   bool     `json:"parallel"`
+	Tools      []string `json:"tools,omitempty"`
+	CallIDs    []string `json:"call_ids,omitempty"`
+	DurationMS int64    `json:"duration_ms,omitempty"`
+	Succeeded  int      `json:"succeeded,omitempty"`
+	Failed     int      `json:"failed,omitempty"`
+	MaxWorkers int      `json:"max_workers,omitempty"`
 }
 
 // LoopDetectedData is payload for loop.detected.

@@ -28,6 +28,11 @@ type AgentConfig struct {
 	TokenBudget int `yaml:"token_budget"`
 	// CompressAt triggers history compaction when estimated history tokens exceed this (0 disables).
 	CompressAt int `yaml:"compress_at"`
+	// ParallelTools enables concurrent read-only tool calls (default true).
+	// YAML bool defaults to false when omitted, so we track with *bool.
+	ParallelTools *bool `yaml:"parallel_tools"`
+	// MaxParallel caps concurrent read-only tools (0 = default 4).
+	MaxParallel int `yaml:"max_parallel"`
 }
 
 // TraceConfig controls where JSONL traces are written.
@@ -44,6 +49,7 @@ type MemoryConfig struct {
 
 // Default returns a sensible default configuration.
 func Default() Config {
+	on := true
 	return Config{
 		Provider: ProviderConfig{
 			Type:        "openai-compatible",
@@ -53,10 +59,12 @@ func Default() Config {
 			TimeoutSec:  120,
 		},
 		Agent: AgentConfig{
-			MaxSteps:     30,
-			SystemPrompt: DefaultSystemPrompt,
-			TokenBudget:  32000,
-			CompressAt:   18000,
+			MaxSteps:      30,
+			SystemPrompt:  DefaultSystemPrompt,
+			TokenBudget:   32000,
+			CompressAt:    18000,
+			ParallelTools: &on,
+			MaxParallel:   4,
 		},
 		Trace: TraceConfig{
 			Dir: ".mincode/traces",
@@ -71,6 +79,10 @@ You have tools to explore and modify the repository:
 - list_dir / glob / grep / read_file: inspect code
 - write_file / edit_file: create or modify files (requires user approval)
 - shell: run commands (go test, git status allow; destructive commands denied)
+
+When independent read-only lookups are needed, issue multiple tool calls in a single
+response (e.g. several read_file/glob/grep). They run in parallel and save time.
+Do not parallelize write_file/edit_file/shell — keep mutations sequential and reviewable.
 
 When asked to analyze a project, use read-only tools first and cite concrete file paths.
 When asked to change code, make the smallest correct edit; prefer edit_file for existing files.

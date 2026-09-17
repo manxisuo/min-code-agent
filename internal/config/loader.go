@@ -114,6 +114,13 @@ func normalize(cfg *Config) {
 	if cfg.Agent.SystemPrompt == "" {
 		cfg.Agent.SystemPrompt = DefaultSystemPrompt
 	}
+	if cfg.Agent.ParallelTools == nil {
+		on := true
+		cfg.Agent.ParallelTools = &on
+	}
+	if cfg.Agent.MaxParallel <= 0 {
+		cfg.Agent.MaxParallel = 4
+	}
 	if cfg.Trace.Dir == "" {
 		cfg.Trace.Dir = ".mincode/traces"
 	}

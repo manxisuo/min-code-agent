@@ -137,6 +137,10 @@ func NewApp(opts Options) (*App, error) {
 
 	sysPrompt := cfg.Agent.SystemPrompt + config.PlatformShellHint(runtime.GOOS)
 	ag := agent.NewWithCompress(provider, registry, bus, sessionID, cfg.Agent.MaxSteps, sysPrompt, cfg.Agent.TokenBudget, cfg.Agent.CompressAt)
+	if cfg.Agent.ParallelTools != nil {
+		ag.ParallelTools = *cfg.Agent.ParallelTools
+	}
+	ag.MaxParallel = cfg.Agent.MaxParallel
 
 	instrLoader, err := instruction.NewLoader(workspace)
 	if err != nil {
@@ -612,7 +616,22 @@ func echoToolEvent(w io.Writer, e observability.Event) {
 	switch e.Type {
 	case observability.EventToolStarted:
 		if data, ok := toolData(e.Data); ok {
-			fmt.Fprintf(w, "  %s %s %s\n", cyan("→"), bold(data.Tool), gray(compactJSON(data.Arguments)))
+			mark := ""
+			if data.Parallel {
+				mark = gray("∥ ")
+			}
+			fmt.Fprintf(w, "  %s %s%s %s\n", cyan("→"), mark, bold(data.Tool), gray(compactJSON(data.Arguments)))
+		}
+	case observability.EventToolBatchStarted:
+		if data, ok := batchData(e.Data); ok {
+			fmt.Fprintf(w, "  %s %s size=%d workers=%d %s\n",
+				cyan("⇉"), bold("parallel batch"), data.Size, data.MaxWorkers, gray(fmt.Sprint(data.Tools)))
+		}
+	case observability.EventToolBatchFinished:
+		if data, ok := batchData(e.Data); ok {
+			fmt.Fprintf(w, "  %s %s ok=%d err=%d %s\n",
+				dim("⇇"), bold("batch done"), data.Succeeded, data.Failed,
+				gray((time.Duration(data.DurationMS) * time.Millisecond).String()))
 		}
 	case observability.EventToolFinished, observability.EventToolFailed:
 		if data, ok := toolData(e.Data); ok {
@@ -662,11 +681,42 @@ func toolData(v any) (observability.ToolEventData, bool) {
 		if b, ok := d["is_error"].(bool); ok {
 			out.IsError = b
 		}
+		if b, ok := d["parallel"].(bool); ok {
+			out.Parallel = b
+		}
+		if s, ok := d["call_id"].(string); ok {
+			out.CallID = s
+		}
+		out.Index = intFromAny(d["index"])
 		out.ResultSize = intFromAny(d["result_size"])
 		out.DurationMS = int64(intFromAny(d["duration_ms"]))
 		return out, true
 	}
 	return observability.ToolEventData{}, false
+}
+
+func batchData(v any) (observability.ToolBatchData, bool) {
+	switch d := v.(type) {
+	case observability.ToolBatchData:
+		return d, true
+	case map[string]any:
+		out := observability.ToolBatchData{}
+		out.Size = intFromAny(d["size"])
+		out.Succeeded = intFromAny(d["succeeded"])
+		out.Failed = intFromAny(d["failed"])
+		out.MaxWorkers = intFromAny(d["max_workers"])
+		out.DurationMS = int64(intFromAny(d["duration_ms"]))
+		if b, ok := d["parallel"].(bool); ok {
+			out.Parallel = b
+		}
+		if raw, ok := d["tools"].([]any); ok {
+			for _, t := range raw {
+				out.Tools = append(out.Tools, fmt.Sprint(t))
+			}
+		}
+		return out, true
+	}
+	return observability.ToolBatchData{}, false
 }
 
 func intFromAny(v any) int {
@@ -1531,7 +1581,21 @@ func timelineLine(e observability.Event) (string, bool) {
 		data := mapFromAny(e.Data)
 		tool, _ := data["tool"].(string)
 		args, _ := data["arguments"].(string)
-		return fmt.Sprintf("%s  %s %s %s", ts, cyan("Tool Start"), bold(tool), gray(truncateStr(compactJSON(args), 50))), true
+		par := ""
+		if b, ok := data["parallel"].(bool); ok && b {
+			par = " ∥"
+		}
+		return fmt.Sprintf("%s  %s %s %s%s", ts, cyan("Tool Start"), bold(tool), gray(truncateStr(compactJSON(args), 50)), par), true
+	case observability.EventToolBatchStarted:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s size=%v workers=%v %v",
+			ts, cyan("Batch Start"), data["size"], data["max_workers"],
+			gray(fmt.Sprint(data["tools"]))), true
+	case observability.EventToolBatchFinished:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s size=%v ok=%v err=%v %v",
+			ts, green("Batch Done"), data["size"], data["succeeded"], data["failed"],
+			gray(fmt.Sprintf("%vms", data["duration_ms"]))), true
 	case observability.EventToolFinished:
 		data := mapFromAny(e.Data)
 		tool, _ := data["tool"].(string)
