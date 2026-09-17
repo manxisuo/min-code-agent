@@ -41,6 +41,8 @@ const (
 	EventInstructionLoaded EventType = "instruction.loaded"
 	EventSkillLoaded       EventType = "skill.loaded"
 	EventSkillUnloaded     EventType = "skill.unloaded"
+	EventMemoryRetrieved   EventType = "memory.retrieved"
+	EventMemoryUpdated     EventType = "memory.updated"
 
 	EventPlanCreated      EventType = "plan.created"
 	EventPlanApproved     EventType = "plan.approved"
@@ -192,6 +194,15 @@ type SkillEventData struct {
 	Bytes   int    `json:"bytes,omitempty"`
 	Summary string `json:"summary,omitempty"`
 	Reason  string `json:"reason,omitempty"` // e.g. "user command"
+}
+
+// MemoryEventData is payload for memory.retrieved / memory.updated.
+type MemoryEventData struct {
+	RelPath string `json:"rel_path,omitempty"`
+	Bytes   int    `json:"bytes,omitempty"`
+	Entries int    `json:"entries,omitempty"`
+	Entry   string `json:"entry,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 }
 
 // PlanEventData is payload for plan.* lifecycle events.

@@ -23,6 +23,7 @@ import (
 	"github.com/mincode/mincode/internal/ctxmgr"
 	"github.com/mincode/mincode/internal/instruction"
 	"github.com/mincode/mincode/internal/llm"
+	"github.com/mincode/mincode/internal/memory"
 	"github.com/mincode/mincode/internal/observability"
 	"github.com/mincode/mincode/internal/plan"
 	"github.com/mincode/mincode/internal/session"
@@ -54,6 +55,7 @@ type App struct {
 	workspace string
 	instr     *instruction.Loader
 	skills    *skill.Loader
+	mem       *memory.Store
 	plans     *plan.Manager
 	out       io.Writer
 	echoTools atomic.Bool
@@ -143,6 +145,12 @@ func NewApp(opts Options) (*App, error) {
 		fmt.Fprintf(os.Stderr, "mincode: discover skills: %v\n", err)
 	}
 
+	memStore, err := memory.New(workspace)
+	if err != nil {
+		_ = recorder.Close()
+		return nil, err
+	}
+
 	sessions := session.NewStore(session.DefaultDir(workspace))
 
 	app := &App{
@@ -157,6 +165,7 @@ func NewApp(opts Options) (*App, error) {
 		workspace: workspace,
 		instr:     instrLoader,
 		skills:    skillLoader,
+		mem:       memStore,
 		plans:     plan.NewManager(),
 		out:       os.Stdout,
 	}
@@ -182,6 +191,7 @@ func NewApp(opts Options) (*App, error) {
 	})
 
 	app.loadRootInstructions()
+	app.loadMemory()
 	return app, nil
 }
 
@@ -247,6 +257,38 @@ func (a *App) emitInstructionLoaded(f *instruction.File) {
 		RelDir:  f.RelDir,
 		Bytes:   len(f.Content),
 	})
+}
+
+// loadMemory loads workspace/memory.md into context when present.
+func (a *App) loadMemory() {
+	if a.mem == nil {
+		return
+	}
+	content, existed, err := a.mem.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mincode: load memory: %v\n", err)
+		return
+	}
+	if !existed || content == "" {
+		return
+	}
+	a.agent.Ctx.SetMemory(a.mem.Compose())
+	a.emit(observability.EventMemoryRetrieved, observability.MemoryEventData{
+		RelPath: memory.FileName,
+		Bytes:   len(content),
+		Entries: countMemoryBullets(content),
+		Reason:  "startup",
+	})
+}
+
+func countMemoryBullets(content string) int {
+	n := 0
+	for _, line := range strings.Split(content, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "- ") {
+			n++
+		}
+	}
+	return n
 }
 
 // Run starts the app: replay / single-shot / continue+REPL / REPL.
@@ -378,6 +420,9 @@ func (a *App) repl(ctx context.Context) error {
 	}
 	if n := len(a.skills.Available()); n > 0 {
 		fmt.Fprintf(a.out, "%s\n", bannerLine("skills", fmt.Sprintf("%d available (use /skills)", n)))
+	}
+	if a.mem != nil && a.mem.Exists() {
+		fmt.Fprintf(a.out, "%s\n", bannerLine("memory", memory.FileName+" loaded"))
 	}
 	fmt.Fprintf(a.out, "Type a message, or %s for commands.\n\n", bold("/help"))
 
@@ -571,6 +616,8 @@ func (a *App) handleCommand(ctx context.Context, line string) (quit bool) {
   /instructions      show loaded AGENTS.md project instructions
   /skills            list available skills
   /skill <name>      activate a skill (or /skill -<name> to deactivate)
+  /memory            show project memory (memory.md)
+  /memory add <fact> append a durable fact to memory.md
   /plan <goal>       draft a plan for a task
   /plan              show current plan
   /plan approve      run the approved plan step by step (Ctrl+C to stop mid-run)
@@ -594,6 +641,8 @@ Trace file:
 		a.printSkills()
 	case "/skill":
 		a.handleSkillCommand(fields[1:])
+	case "/memory":
+		a.handleMemoryCommand(fields[1:])
 	case "/plan":
 		a.handlePlanCommand(ctx, fields[1:])
 	case "/trace":
@@ -793,6 +842,54 @@ func (a *App) syncSkillsToContext() {
 		return
 	}
 	a.agent.Ctx.SetSkills(a.skills.Compose())
+}
+
+// handleMemoryCommand: /memory | /memory add <fact>
+func (a *App) handleMemoryCommand(args []string) {
+	if a.mem == nil {
+		fmt.Fprintf(a.out, "%s memory unavailable\n", yellow("warn"))
+		return
+	}
+	if len(args) == 0 {
+		a.printMemory()
+		return
+	}
+	if args[0] != "add" {
+		fmt.Fprintf(a.out, "%s usage: /memory  or  /memory add <fact>\n", yellow("usage:"))
+		return
+	}
+	fact := strings.TrimSpace(strings.Join(args[1:], " "))
+	if fact == "" {
+		fmt.Fprintf(a.out, "%s usage: /memory add <fact>\n", yellow("usage:"))
+		return
+	}
+	content, err := a.mem.Add(fact)
+	if err != nil {
+		fmt.Fprintf(a.out, "%s %v\n", red("error:"), err)
+		return
+	}
+	a.agent.Ctx.SetMemory(a.mem.Compose())
+	a.emit(observability.EventMemoryUpdated, observability.MemoryEventData{
+		RelPath: memory.FileName,
+		Bytes:   len(content),
+		Entries: countMemoryBullets(content),
+		Entry:   fact,
+		Reason:  "user command",
+	})
+	fmt.Fprintf(a.out, "%s memory updated (%s)\n", green("ok"), memory.FileName)
+}
+
+func (a *App) printMemory() {
+	fmt.Fprintln(a.out)
+	content := a.mem.Content()
+	if content == "" {
+		fmt.Fprintf(a.out, "%s — add one with %s\n\n",
+			yellow("no project memory yet"), bold("/memory add <fact>"))
+		return
+	}
+	fmt.Fprintf(a.out, "%s  %s\n\n", bold("Project Memory"), gray(a.mem.Path()))
+	fmt.Fprintln(a.out, content)
+	fmt.Fprintln(a.out)
 }
 
 // handlePlanCommand: /plan [goal | approve | reject | cancel | show]
@@ -1168,6 +1265,8 @@ func paintSource(src string) string {
 		return magenta(src)
 	case "skills":
 		return yellow(src)
+	case "memory":
+		return blue(src)
 	case "user_input":
 		return green(src)
 	case "history":
@@ -1318,6 +1417,13 @@ func timelineLine(e observability.Event) (string, bool) {
 		data := mapFromAny(e.Data)
 		name, _ := data["name"].(string)
 		return fmt.Sprintf("%s  %s %s", ts, dim("Skill Unloaded"), bold(name)), true
+	case observability.EventMemoryRetrieved:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v entries", ts, blue("Memory"), data["entries"]), true
+	case observability.EventMemoryUpdated:
+		data := mapFromAny(e.Data)
+		entry, _ := data["entry"].(string)
+		return fmt.Sprintf("%s  %s %s", ts, blue("Memory Updated"), gray(truncateStr(entry, 48))), true
 	case observability.EventPlanCreated:
 		data := mapFromAny(e.Data)
 		goal, _ := data["goal"].(string)
@@ -1473,6 +1579,8 @@ func paintEventType(typ string) string {
 		return magenta(typ)
 	case typ == "skill.loaded" || typ == "skill.unloaded":
 		return yellow(typ)
+	case strings.HasPrefix(typ, "memory."):
+		return blue(typ)
 	case strings.HasPrefix(typ, "plan."):
 		return yellow(typ)
 	case strings.HasPrefix(typ, "llm."):

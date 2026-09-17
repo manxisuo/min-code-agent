@@ -15,6 +15,7 @@ const (
 	SourceSystem       Source = "system"
 	SourceInstructions Source = "instructions"
 	SourceSkills       Source = "skills"
+	SourceMemory       Source = "memory"
 	SourceHistory      Source = "history"
 	SourceToolResult   Source = "tool_result"
 	SourceUserInput    Source = "user_input"

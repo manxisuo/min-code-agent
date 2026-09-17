@@ -103,12 +103,13 @@ session.restored
 instruction.loaded
 skill.loaded
 skill.unloaded
+memory.retrieved
+memory.updated
 ```
 
 后续可以扩展：
 
 ```text
-memory.retrieved
 loop.detected
 context.item_dropped
 context.item_truncated
