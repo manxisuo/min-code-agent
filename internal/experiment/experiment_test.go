@@ -47,6 +47,9 @@ func TestStoreSaveLoadSummarize(t *testing.T) {
 	if agg.AvgTotalTok != 125 {
 		t.Fatalf("avg total = %v", agg.AvgTotalTok)
 	}
+	if agg.StepsStat.Min != 2 || agg.StepsStat.Max != 4 || agg.StepsStat.Median != 3 {
+		t.Fatalf("steps stat = %+v", agg.StepsStat)
+	}
 	if agg.TotalFailures != 1 {
 		t.Fatalf("failures = %d", agg.TotalFailures)
 	}
@@ -80,12 +83,15 @@ func TestFormatReports(t *testing.T) {
 	if !strings.Contains(list, "A") || !strings.Contains(list, "B") {
 		t.Fatalf("list = %q", list)
 	}
+	if !strings.Contains(list, "med_steps") {
+		t.Fatalf("list missing median: %q", list)
+	}
 
 	show, err := FormatShow(st, "A")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(show, "a1") {
+	if !strings.Contains(show, "a1") || !strings.Contains(show, "median") {
 		t.Fatalf("show = %q", show)
 	}
 
@@ -93,8 +99,19 @@ func TestFormatReports(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(cmp, "avg total tok") {
+	if !strings.Contains(cmp, "steps median") || !strings.Contains(cmp, "total tok median") {
 		t.Fatalf("cmp = %q", cmp)
+	}
+}
+
+func TestStatMedianEvenOdd(t *testing.T) {
+	odd := statOf([]float64{3, 1, 2})
+	if odd.Median != 2 || odd.Min != 1 || odd.Max != 3 {
+		t.Fatalf("odd = %+v", odd)
+	}
+	even := statOf([]float64{8, 2, 4, 6})
+	if even.Median != 5 {
+		t.Fatalf("even median = %v", even.Median)
 	}
 }
 

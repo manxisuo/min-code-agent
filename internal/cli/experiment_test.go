@@ -62,7 +62,7 @@ func TestExperimentRunListCompare(t *testing.T) {
 
 	out.Reset()
 	code = RunExperimentCLI([]string{"compare", "baseline", "alt", "--workspace", ws}, &out)
-	if code != 0 || !strings.Contains(out.String(), "avg total tok") {
+	if code != 0 || !strings.Contains(out.String(), "total tok median") {
 		t.Fatalf("compare exit=%d out=%s", code, out.String())
 	}
 

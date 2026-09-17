@@ -52,7 +52,14 @@ type RunResult struct {
 	TracePath    string `json:"trace_path,omitempty"`
 }
 
-// Aggregate is the mean/sum summary of all runs under one experiment name.
+// Stat is min/median/max for one numeric metric across runs.
+type Stat struct {
+	Min    float64 `json:"min"`
+	Median float64 `json:"median"`
+	Max    float64 `json:"max"`
+}
+
+// Aggregate is the summary of all runs under one experiment name.
 type Aggregate struct {
 	Name           string  `json:"name"`
 	Runs           int     `json:"runs"`
@@ -68,6 +75,11 @@ type Aggregate struct {
 	TotalFailures  int     `json:"total_failures"`
 	Models         string  `json:"models,omitempty"`
 	Tasks          string  `json:"tasks,omitempty"`
+	// Distribution stats (prefer median over mean when runs vary a lot).
+	StepsStat      Stat `json:"steps_stat"`
+	ToolCallsStat  Stat `json:"tool_calls_stat"`
+	TotalTokStat   Stat `json:"total_tokens_stat"`
+	DurationMSStat Stat `json:"duration_ms_stat"`
 }
 
 // Store persists results under <workspace>/.mincode/experiments/<name>/.
@@ -170,6 +182,10 @@ func Summarize(name string, runs []RunResult) Aggregate {
 	models := map[string]bool{}
 	tasks := map[string]bool{}
 	var steps, tools, llm, inTok, outTok, totTok, dur, comp int
+	stepsV := make([]float64, 0, len(runs))
+	toolsV := make([]float64, 0, len(runs))
+	tokV := make([]float64, 0, len(runs))
+	durV := make([]float64, 0, len(runs))
 	for _, r := range runs {
 		if r.Success {
 			agg.Successes++
@@ -183,6 +199,10 @@ func Summarize(name string, runs []RunResult) Aggregate {
 		dur += int(r.DurationMS)
 		comp += r.Compactions
 		agg.TotalFailures += r.Failures
+		stepsV = append(stepsV, float64(r.Steps))
+		toolsV = append(toolsV, float64(r.ToolCalls))
+		tokV = append(tokV, float64(r.TotalTokens))
+		durV = append(durV, float64(r.DurationMS))
 		if r.Model != "" {
 			models[r.Model] = true
 		}
@@ -201,7 +221,37 @@ func Summarize(name string, runs []RunResult) Aggregate {
 	agg.AvgCompactions = float64(comp) / n
 	agg.Models = joinKeys(models)
 	agg.Tasks = joinKeys(tasks)
+	agg.StepsStat = statOf(stepsV)
+	agg.ToolCallsStat = statOf(toolsV)
+	agg.TotalTokStat = statOf(tokV)
+	agg.DurationMSStat = statOf(durV)
 	return agg
+}
+
+// statOf returns min/median/max. Median uses the lower-middle element for even n
+// (standard "upper median" is the average of two middles — we use simple mid pick).
+func statOf(vals []float64) Stat {
+	if len(vals) == 0 {
+		return Stat{}
+	}
+	sorted := append([]float64(nil), vals...)
+	sort.Float64s(sorted)
+	return Stat{
+		Min:    sorted[0],
+		Median: medianSorted(sorted),
+		Max:    sorted[len(sorted)-1],
+	}
+}
+
+func medianSorted(sorted []float64) float64 {
+	n := len(sorted)
+	if n == 0 {
+		return 0
+	}
+	if n%2 == 1 {
+		return sorted[n/2]
+	}
+	return (sorted[n/2-1] + sorted[n/2]) / 2
 }
 
 func joinKeys(m map[string]bool) string {
