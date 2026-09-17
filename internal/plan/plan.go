@@ -156,6 +156,21 @@ func (p *Plan) FailStep(i int, msg string) error {
 	return nil
 }
 
+// CancelStep marks step i cancelled (user interrupt) and cancels the plan.
+func (p *Plan) CancelStep(i int, reason string) error {
+	if err := p.stepIndex(i); err != nil {
+		return err
+	}
+	p.Steps[i-1].Status = StatusCancelled
+	if reason == "" {
+		reason = "cancelled"
+	}
+	p.Steps[i-1].Error = reason
+	p.Status = StatusCancelled
+	p.Current = 0
+	return nil
+}
+
 // Finish marks the whole plan done if every step succeeded.
 func (p *Plan) Finish() {
 	if p == nil {
@@ -217,6 +232,8 @@ func statusMark(st Status) string {
 		return "[>]"
 	case StatusFailed:
 		return "[!]"
+	case StatusCancelled:
+		return "[c]"
 	case StatusSkipped:
 		return "[-]"
 	case StatusPending, StatusDraft:

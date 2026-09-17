@@ -127,6 +127,42 @@ random prose line should be ignored
 	}
 }
 
+func TestCancelStepMarksPlanCancelled(t *testing.T) {
+	p := NewPlan("p", "g", []string{"a", "b"})
+	_ = p.Approve()
+	_ = p.StartStep(1)
+	if err := p.CancelStep(1, "cancelled"); err != nil {
+		t.Fatal(err)
+	}
+	if p.Status != StatusCancelled {
+		t.Fatalf("plan status = %s, want cancelled", p.Status)
+	}
+	if p.Steps[0].Status != StatusCancelled {
+		t.Fatalf("step status = %s", p.Steps[0].Status)
+	}
+	if p.Steps[0].Error != "cancelled" {
+		t.Fatalf("step error = %q", p.Steps[0].Error)
+	}
+	// Re-approve after cancel should fail (not draft).
+	if err := p.Approve(); err == nil {
+		t.Fatal("expected approve error on cancelled plan")
+	}
+}
+
+func TestCancelOnlyApprovedOrRunning(t *testing.T) {
+	p := NewPlan("p", "g", []string{"a"})
+	// draft: cancel is no-op
+	p.Cancel()
+	if p.Status != StatusDraft {
+		t.Fatalf("draft cancel changed status to %s", p.Status)
+	}
+	_ = p.Approve()
+	p.Cancel()
+	if p.Status != StatusCancelled {
+		t.Fatalf("status = %s", p.Status)
+	}
+}
+
 func TestFormat(t *testing.T) {
 	p := NewPlan("p1", "do thing", []string{"step one"})
 	_ = p.Approve()

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -250,16 +251,39 @@ func (a *App) emitInstructionLoaded(f *instruction.File) {
 
 // Run starts the app: replay / single-shot / continue+REPL / REPL.
 func (a *App) Run(ctx context.Context, opts Options) error {
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	if opts.Replay != "" {
 		return a.runReplay(opts.Replay)
 	}
+	// Single-shot: Ctrl+C cancels the one request, then process exits.
 	if opts.Prompt != "" {
+		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
 		return a.singleShot(ctx, opts.Prompt)
 	}
+	// REPL: SIGINT must cancel only the in-flight turn, not the whole session.
 	return a.repl(ctx)
+}
+
+// beginTurn returns a context for one REPL turn/plan execution.
+// Ctrl+C cancels only this context; the parent session context stays alive.
+func beginTurn(parent context.Context) (context.Context, context.CancelFunc) {
+	turnCtx, cancel := context.WithCancel(parent)
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-sig:
+			cancel()
+		case <-done:
+		}
+	}()
+	stop := func() {
+		signal.Stop(sig)
+		close(done)
+		cancel()
+	}
+	return turnCtx, stop
 }
 
 func (a *App) restoreLatestSession() error {
@@ -373,15 +397,19 @@ func (a *App) repl(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, "/") {
-			if quit := a.handleCommand(ctx, line); quit {
+			turnCtx, stopTurn := beginTurn(ctx)
+			quit := a.handleCommand(turnCtx, line)
+			stopTurn()
+			if quit {
 				break
 			}
 			continue
 		}
 
-		if err := a.runTurn(ctx, line); err != nil {
-			fmt.Fprintf(a.out, "error: %v\n", err)
-		}
+		turnCtx, stopTurn := beginTurn(ctx)
+		err := a.runTurn(turnCtx, line)
+		stopTurn()
+		a.reportTurnError(err)
 		a.saveSession()
 	}
 
@@ -394,6 +422,18 @@ func (a *App) repl(ctx context.Context) error {
 
 func (a *App) toolNames() []string {
 	return []string{"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "shell"}
+}
+
+// reportTurnError prints a user-facing message for a failed/cancelled turn.
+func (a *App) reportTurnError(err error) {
+	if err == nil {
+		return
+	}
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		fmt.Fprintf(a.out, "%s cancelled — session still alive, try again\n", yellow("interrupted"))
+		return
+	}
+	fmt.Fprintf(a.out, "error: %v\n", err)
 }
 
 // runTurn executes one user turn through the agent and prints tool + final output.
@@ -533,9 +573,9 @@ func (a *App) handleCommand(ctx context.Context, line string) (quit bool) {
   /skill <name>      activate a skill (or /skill -<name> to deactivate)
   /plan <goal>       draft a plan for a task
   /plan              show current plan
-  /plan approve      run the approved plan step by step
+  /plan approve      run the approved plan step by step (Ctrl+C to stop mid-run)
   /plan reject       discard the draft plan
-  /plan cancel       cancel a running/approved plan
+  /plan cancel       mark an approved (not yet finished) plan cancelled
   /trace [n]         show last n raw trace events (default 30)
   /metrics           show session token/time metrics
   /clear             clear conversation history
@@ -789,7 +829,7 @@ func (a *App) printCurrentPlan() {
 		fmt.Fprintf(a.out, "\n%s  %s  %s\n",
 			gray("next:"), bold("/plan approve"), gray("or /plan reject"))
 	case plan.StatusApproved, plan.StatusRunning:
-		fmt.Fprintf(a.out, "\n%s  %s\n", gray("status:"), "running / use /plan cancel to stop")
+		fmt.Fprintf(a.out, "\n%s  %s\n", gray("status:"), "in progress — press Ctrl+C to interrupt the current step")
 	}
 	fmt.Fprintln(a.out)
 }
@@ -882,7 +922,12 @@ func (a *App) cancelPlan() {
 		fmt.Fprintf(a.out, "%s no active plan\n", yellow("warn"))
 		return
 	}
+	before := p.Status
 	p.Cancel()
+	if p.Status == before {
+		fmt.Fprintf(a.out, "%s plan is already %s — nothing to cancel\n", yellow("info"), before)
+		return
+	}
 	a.emit(observability.EventPlanCancelled, observability.PlanEventData{
 		PlanID: p.ID,
 		Goal:   p.Goal,
@@ -913,10 +958,16 @@ func (a *App) approveAndRunPlan(ctx context.Context) {
 	a.echoTools.Store(true)
 	defer a.echoTools.Store(false)
 
+	// Plan steps share agent.MaxSteps (config, default 30). Budget is not lowered:
+	// thrashing is deterred by the step prompt, not by starving legitimate work.
+	planStepBudget := a.agent.MaxSteps
+
+	var stepNotes []string
+
 	for i := range p.Steps {
 		if err := ctx.Err(); err != nil {
 			p.Cancel()
-			fmt.Fprintf(a.out, "\n%s cancelled: %v\n", yellow("plan"), err)
+			fmt.Fprintf(a.out, "\n%s interrupted before step %d — session still alive\n", yellow("plan"), i+1)
 			return
 		}
 		if p.Status == plan.StatusCancelled {
@@ -939,17 +990,25 @@ func (a *App) approveAndRunPlan(ctx context.Context) {
 		fmt.Fprintf(a.out, "%s step %d/%d %s\n",
 			cyan("→"), step.Index, len(p.Steps), bold(step.Title))
 
-		prompt := fmt.Sprintf(
-			"You are executing step %d of %d of an approved plan.\n"+
-				"Overall goal: %s\n"+
-				"Current step: %s\n\n"+
-				"Complete only this step using tools as needed. "+
-				"When finished, reply with a one-line summary of what you did.",
-			step.Index, len(p.Steps), p.Goal, step.Title,
-		)
+		prompt := buildPlanStepPrompt(step.Index, len(p.Steps), p.Goal, step.Title, stepNotes)
 
 		res, err := a.agent.Run(ctx, prompt)
 		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				_ = p.CancelStep(step.Index, "cancelled")
+				a.emit(observability.EventPlanStepFailed, observability.PlanEventData{
+					PlanID:    p.ID,
+					StepIndex: step.Index,
+					StepTitle: step.Title,
+					Error:     "cancelled",
+					Status:    string(plan.StatusCancelled),
+				})
+				fmt.Fprintf(a.out, "\n%s interrupted at step %d — session still alive\n", yellow("plan"), step.Index)
+				return
+			}
+			if errors.Is(err, agent.MaxStepsExceeded) {
+				err = fmt.Errorf("step budget exceeded (%d tool/LLM turns) — step too broad or model thrashing; try a smaller goal or raise agent.max_steps", planStepBudget)
+			}
 			_ = p.FailStep(step.Index, err.Error())
 			done, total := p.Progress()
 			a.emit(observability.EventPlanStepFailed, observability.PlanEventData{
@@ -964,7 +1023,8 @@ func (a *App) approveAndRunPlan(ctx context.Context) {
 			return
 		}
 
-		summary := strings.TrimSpace(res.Final)
+		full := strings.TrimSpace(res.Final)
+		summary := full
 		if summary == "" {
 			summary = "ok"
 		}
@@ -972,6 +1032,7 @@ func (a *App) approveAndRunPlan(ctx context.Context) {
 			summary = truncateStr(summary, 120)
 		}
 		_ = p.CompleteStep(step.Index, summary)
+		stepNotes = append(stepNotes, fmt.Sprintf("- Step %d (%s): %s", step.Index, step.Title, summary))
 		done, total := p.Progress()
 		a.emit(observability.EventPlanStepFinished, observability.PlanEventData{
 			PlanID:    p.ID,
@@ -981,7 +1042,13 @@ func (a *App) approveAndRunPlan(ctx context.Context) {
 			DoneCount: done,
 			StepCount: total,
 		})
-		fmt.Fprintf(a.out, "%s step %d done  %s\n\n", green("✓"), step.Index, gray(summary))
+		// Print the step's full answer (not the truncated plan-panel summary).
+		if full != "" {
+			fmt.Fprintln(a.out)
+			fmt.Fprintln(a.out, full)
+			fmt.Fprintln(a.out)
+		}
+		fmt.Fprintf(a.out, "%s step %d done\n\n", green("✓"), step.Index)
 	}
 
 	p.Finish()
@@ -999,6 +1066,30 @@ func (a *App) approveAndRunPlan(ctx context.Context) {
 		fmt.Fprintf(a.out, "\n%s plan %s complete\n", green("ok"), bold(p.ID))
 	}
 	fmt.Fprintln(a.out)
+}
+
+// buildPlanStepPrompt keeps each plan step focused so it cannot burn the whole
+// agent step budget on unrelated exploration.
+func buildPlanStepPrompt(index, total int, goal, title string, prior []string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "You are executing step %d of %d of an approved plan.\n", index, total)
+	fmt.Fprintf(&b, "Overall goal: %s\n", goal)
+	fmt.Fprintf(&b, "Current step ONLY: %s\n\n", title)
+	if len(prior) > 0 {
+		b.WriteString("Prior step results (do not redo them):\n")
+		for _, n := range prior {
+			b.WriteString(n)
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Rules:\n")
+	b.WriteString("- Work only on the current step; do not start later steps.\n")
+	b.WriteString("- Do not open .mincode/, traces, or agent runtime files unless the step explicitly asks.\n")
+	b.WriteString("- Prefer read_file / list_dir / glob / grep; avoid exploratory shell probes.\n")
+	b.WriteString("- Be decisive: a few tool calls, then stop.\n")
+	b.WriteString("- Reply with a one-line summary of what you did (no tool calls once done).\n")
+	return b.String()
 }
 
 func formatSnapshot(s ctxmgr.Snapshot) string {
