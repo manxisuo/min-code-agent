@@ -16,7 +16,7 @@ func newMemoryApp(t *testing.T, withFile bool) *App {
 	t.Helper()
 	wsDir := t.TempDir()
 	if withFile {
-		if err := os.WriteFile(filepath.Join(wsDir, "memory.md"),
+		if err := os.WriteFile(filepath.Join(wsDir, "MEMORY.md"),
 			[]byte("# Memory\n\n## 2026-01-01\n\n- Entry point is cmd/mincode\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -74,7 +74,7 @@ func TestMemoryAddCommand(t *testing.T) {
 	if !strings.Contains(app.agent.Ctx.Memory(), "go test") {
 		t.Fatalf("ctx memory = %q", app.agent.Ctx.Memory())
 	}
-	if _, err := os.Stat(filepath.Join(app.workspace, "memory.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(app.workspace, "MEMORY.md")); err != nil {
 		t.Fatal(err)
 	}
 

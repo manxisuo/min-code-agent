@@ -37,7 +37,7 @@ func TestAddAndReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !s.Exists() {
-		t.Fatal("memory.md missing")
+		t.Fatal("MEMORY.md missing")
 	}
 	data, err := os.ReadFile(filepath.Join(root, FileName))
 	if err != nil {

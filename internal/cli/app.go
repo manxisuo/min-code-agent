@@ -273,7 +273,7 @@ func (a *App) emitInstructionLoaded(f *instruction.File) {
 	})
 }
 
-// loadMemory loads workspace/memory.md into context when present.
+// loadMemory loads workspace/MEMORY.md into context when present.
 func (a *App) loadMemory() {
 	if a.mem == nil {
 		return
@@ -632,8 +632,8 @@ func (a *App) handleCommand(ctx context.Context, line string) (quit bool) {
   /instructions      show loaded AGENTS.md project instructions
   /skills            list available skills
   /skill <name>      activate a skill (or /skill -<name> to deactivate)
-  /memory            show project memory (memory.md)
-  /memory add <fact> append a durable fact to memory.md
+  /memory            show project memory (MEMORY.md)
+  /memory add <fact> append a durable fact to MEMORY.md
   /plan <goal>       draft a plan for a task
   /plan              show current plan
   /plan approve      run the approved plan step by step (Ctrl+C to stop mid-run)

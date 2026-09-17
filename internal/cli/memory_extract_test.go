@@ -100,7 +100,7 @@ func TestMemoryAutoExtractSavesFact(t *testing.T) {
 	if !strings.Contains(buf.String(), "memory") {
 		t.Fatalf("out = %q", buf.String())
 	}
-	if _, err := os.Stat(filepath.Join(app.workspace, "memory.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(app.workspace, "MEMORY.md")); err != nil {
 		t.Fatal(err)
 	}
 

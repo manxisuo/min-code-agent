@@ -87,7 +87,7 @@ func (a *App) maybeExtractMemory(ctx context.Context, userText, final string) {
 func (a *App) extractMemoryEntry(ctx context.Context, userText, final string) (string, error) {
 	user := truncateRunes(strings.TrimSpace(userText), 1500)
 	asst := truncateRunes(strings.TrimSpace(final), 2000)
-	prompt := `Review this coding-assistant turn. Propose AT MOST one durable project fact for memory.md.
+	prompt := `Review this coding-assistant turn. Propose AT MOST one durable project fact for MEMORY.md.
 
 Save only if it will still matter in a NEW chat (stable architecture fact, long-term decision, enduring constraint).
 Do NOT save: temporary task progress, secrets, session-specific chatter, or generic advice.

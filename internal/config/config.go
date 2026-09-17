@@ -35,7 +35,7 @@ type TraceConfig struct {
 	Dir string `yaml:"dir"`
 }
 
-// MemoryConfig controls cross-session memory.md behavior.
+// MemoryConfig controls cross-session MEMORY.md behavior.
 type MemoryConfig struct {
 	// AutoExtract, when true, asks the LLM after each successful turn whether
 	// a durable cross-session fact should be written (still requires approval).

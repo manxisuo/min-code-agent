@@ -349,7 +349,7 @@ approval
 ### 第一版
 
 ```text
-memory.md
+MEMORY.md
 ```
 
 用途：

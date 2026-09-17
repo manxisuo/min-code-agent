@@ -1,4 +1,4 @@
-// Package memory loads and updates the workspace memory.md file.
+// Package memory loads and updates the workspace MEMORY.md file.
 package memory
 
 import (
@@ -10,9 +10,9 @@ import (
 )
 
 // FileName is the cross-session memory document at the workspace root.
-const FileName = "memory.md"
+const FileName = "MEMORY.md"
 
-// Store reads and appends to workspace/memory.md.
+// Store reads and appends to workspace/MEMORY.md.
 type Store struct {
 	workspace string
 	path      string
@@ -36,13 +36,13 @@ func New(workspace string) (*Store, error) {
 	}, nil
 }
 
-// Path returns the absolute memory.md path.
+// Path returns the absolute MEMORY.md path.
 func (s *Store) Path() string { return s.path }
 
 // RelPath is the workspace-relative path for display.
 func (s *Store) RelPath() string { return FileName }
 
-// Load reads memory.md. Missing file is not an error (empty memory).
+// Load reads MEMORY.md. Missing file is not an error (empty memory).
 func (s *Store) Load() (string, bool, error) {
 	data, err := os.ReadFile(s.path)
 	if err != nil {
@@ -78,14 +78,12 @@ func (s *Store) Compose() string {
 	return "## Project memory (stable facts across sessions)\n\n" + c + "\n"
 }
 
-// Add appends one memory entry under a date heading and reloads.
-// Returns the full new content.
+// Add appends one memory entry under a date heading and writes MEMORY.md.
 func (s *Store) Add(entry string) (string, error) {
 	entry = strings.TrimSpace(entry)
 	if entry == "" {
 		return "", fmt.Errorf("empty memory entry")
 	}
-	// Collapse newlines in a single entry into one bullet line.
 	entry = strings.ReplaceAll(entry, "\n", " ")
 	line := "- " + entry
 
@@ -102,7 +100,6 @@ func (s *Store) Add(entry string) (string, error) {
 	} else {
 		b.WriteString(existing)
 		b.WriteString("\n")
-		// Append under today's heading if the last heading matches; else new section.
 		if strings.Contains(existing, "## "+stamp) {
 			b.WriteString(line)
 			b.WriteString("\n")
@@ -120,7 +117,7 @@ func (s *Store) Add(entry string) (string, error) {
 	return s.content, nil
 }
 
-// Exists reports whether memory.md is present on disk.
+// Exists reports whether MEMORY.md is present on disk.
 func (s *Store) Exists() bool {
 	_, err := os.Stat(s.path)
 	return err == nil

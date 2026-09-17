@@ -13,7 +13,7 @@ type MemoryStore interface {
 	Compose() string
 }
 
-// MemoryAdd appends one durable project fact to memory.md.
+// MemoryAdd appends one durable project fact to MEMORY.md.
 type MemoryAdd struct {
 	Store MemoryStore
 	// OnAdded is optional; called after a successful append (CLI refreshes context / events).
@@ -23,7 +23,7 @@ type MemoryAdd struct {
 func (t *MemoryAdd) Name() string { return "memory_add" }
 
 func (t *MemoryAdd) Description() string {
-	return `Append one durable project fact to memory.md for future sessions.
+	return `Append one durable project fact to MEMORY.md for future sessions.
 
 Use ONLY when the fact will still matter in a NEW chat (stable constraints, long-term decisions, enduring architecture facts). Do NOT store temporary task progress, ephemeral tool output, secrets/API keys, or anything that only applies to this conversation.
 
@@ -66,7 +66,7 @@ func (t *MemoryAdd) Execute(ctx context.Context, raw json.RawMessage) (Result, e
 	}
 	if looksLikeSecret(entry) {
 		return Result{
-			Content: "refusing to store a possible secret/credential in memory.md; redact tokens, keys, and passwords",
+			Content: "refusing to store a possible secret/credential in MEMORY.md; redact tokens, keys, and passwords",
 			IsError: true,
 		}, nil
 	}
@@ -80,9 +80,9 @@ func (t *MemoryAdd) Execute(ctx context.Context, raw json.RawMessage) (Result, e
 		t.OnAdded(entry, composed)
 	}
 	return Result{
-		Content: fmt.Sprintf("saved to memory.md: %s", entry),
+		Content: fmt.Sprintf("saved to MEMORY.md: %s", entry),
 		Meta: map[string]any{
-			"path":    "memory.md",
+			"path":    "MEMORY.md",
 			"entry":   entry,
 			"bytes":   len(content),
 			"entries": countBullets(content),

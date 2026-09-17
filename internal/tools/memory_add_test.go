@@ -50,7 +50,7 @@ func TestMemoryAddSuccess(t *testing.T) {
 	if !strings.HasPrefix(gotCompose, "MEM:") {
 		t.Fatalf("compose = %q", gotCompose)
 	}
-	if res.Meta["path"] != "memory.md" {
+	if res.Meta["path"] != "MEMORY.md" {
 		t.Fatalf("meta = %+v", res.Meta)
 	}
 }

@@ -53,7 +53,7 @@ func TestMemoryAddToolViaAgent(t *testing.T) {
 	if !strings.Contains(app.agent.Ctx.Memory(), "internal/*/_test.go") {
 		t.Fatalf("memory = %q", app.agent.Ctx.Memory())
 	}
-	if _, err := os.Stat(filepath.Join(wsDir, "memory.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(wsDir, "MEMORY.md")); err != nil {
 		t.Fatal(err)
 	}
 
