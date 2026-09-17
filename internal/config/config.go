@@ -4,6 +4,7 @@ package config
 type Config struct {
 	Provider ProviderConfig `yaml:"provider"`
 	Agent    AgentConfig    `yaml:"agent"`
+	Memory   MemoryConfig   `yaml:"memory"`
 	Trace    TraceConfig    `yaml:"trace"`
 }
 
@@ -32,6 +33,13 @@ type AgentConfig struct {
 // TraceConfig controls where JSONL traces are written.
 type TraceConfig struct {
 	Dir string `yaml:"dir"`
+}
+
+// MemoryConfig controls cross-session memory.md behavior.
+type MemoryConfig struct {
+	// AutoExtract, when true, asks the LLM after each successful turn whether
+	// a durable cross-session fact should be written (still requires approval).
+	AutoExtract bool `yaml:"auto_extract"`
 }
 
 // Default returns a sensible default configuration.

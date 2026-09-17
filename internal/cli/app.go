@@ -117,6 +117,13 @@ func NewApp(opts Options) (*App, error) {
 		_ = recorder.Close()
 		return nil, err
 	}
+
+	memStore, err := memory.New(workspace)
+	if err != nil {
+		_ = recorder.Close()
+		return nil, err
+	}
+
 	registry := tools.NewRegistry()
 	registry.Register(&tools.ReadFile{WS: ws})
 	registry.Register(&tools.ListDir{WS: ws})
@@ -145,12 +152,6 @@ func NewApp(opts Options) (*App, error) {
 		fmt.Fprintf(os.Stderr, "mincode: discover skills: %v\n", err)
 	}
 
-	memStore, err := memory.New(workspace)
-	if err != nil {
-		_ = recorder.Close()
-		return nil, err
-	}
-
 	sessions := session.NewStore(session.DefaultDir(workspace))
 
 	app := &App{
@@ -169,6 +170,19 @@ func NewApp(opts Options) (*App, error) {
 		plans:     plan.NewManager(),
 		out:       os.Stdout,
 	}
+
+	registry.Register(&tools.MemoryAdd{
+		Store: memStore,
+		OnAdded: func(entry, composed string) {
+			ag.Ctx.SetMemory(composed)
+			app.emit(observability.EventMemoryUpdated, observability.MemoryEventData{
+				RelPath: memory.FileName,
+				Bytes:   len(composed),
+				Entry:   entry,
+				Reason:  "agent tool memory_add",
+			})
+		},
+	})
 
 	if opts.Continue {
 		if err := app.restoreLatestSession(); err != nil {
@@ -466,7 +480,7 @@ func (a *App) repl(ctx context.Context) error {
 }
 
 func (a *App) toolNames() []string {
-	return []string{"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "shell"}
+	return []string{"read_file", "list_dir", "glob", "grep", "write_file", "edit_file", "shell", "memory_add"}
 }
 
 // reportTurnError prints a user-facing message for a failed/cancelled turn.
@@ -497,6 +511,8 @@ func (a *App) runTurn(ctx context.Context, userText string) error {
 	} else {
 		fmt.Fprintln(a.out)
 	}
+	// Opt-in: propose one durable memory fact after a successful turn.
+	a.maybeExtractMemory(ctx, userText, res.Final)
 	return nil
 }
 

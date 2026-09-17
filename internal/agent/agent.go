@@ -448,6 +448,12 @@ func summarizeToolCall(name, args string) string {
 		return fmt.Sprintf("edit_file %s", path)
 	case "read_file":
 		return fmt.Sprintf("read_file %s", path)
+	case "memory_add":
+		entry, _ := m["entry"].(string)
+		if entry != "" {
+			return "memory_add " + truncatePreview(entry, 60)
+		}
+		return "memory_add"
 	case "shell":
 		cmd, _ := m["command"].(string)
 		return "shell " + cmd

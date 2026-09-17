@@ -61,6 +61,7 @@ func NewDefaultPolicy() *DefaultPolicy {
 			"write_file": Ask,
 			"edit_file":  Ask,
 			"shell":      Ask, // Phase 5; reserved
+			"memory_add": Ask, // durable fact write — user confirms
 		},
 	}
 }
