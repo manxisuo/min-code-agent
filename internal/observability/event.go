@@ -39,6 +39,8 @@ const (
 	EventFileChanged EventType = "file.changed"
 
 	EventInstructionLoaded EventType = "instruction.loaded"
+	EventSkillLoaded       EventType = "skill.loaded"
+	EventSkillUnloaded     EventType = "skill.unloaded"
 
 	EventLoopDetected EventType = "loop.detected"
 )
@@ -172,4 +174,13 @@ type InstructionLoadedData struct {
 	RelDir  string `json:"rel_dir"`
 	Bytes   int    `json:"bytes"`
 	Content string `json:"content,omitempty"`
+}
+
+// SkillEventData is payload for skill.loaded / skill.unloaded.
+type SkillEventData struct {
+	Name    string `json:"name"`
+	RelPath string `json:"rel_path,omitempty"`
+	Bytes   int    `json:"bytes,omitempty"`
+	Summary string `json:"summary,omitempty"`
+	Reason  string `json:"reason,omitempty"` // e.g. "user command"
 }

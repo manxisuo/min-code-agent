@@ -25,6 +25,7 @@ type entry struct {
 type Manager struct {
 	system       string
 	instructions string
+	skills       string
 	budget       int
 	compressAt   int
 	entries      []entry
@@ -57,6 +58,8 @@ func (m *Manager) SetBudget(n int) {
 
 func (m *Manager) SetInstructions(s string) { m.instructions = s }
 func (m *Manager) Instructions() string     { return m.instructions }
+func (m *Manager) SetSkills(s string)       { m.skills = s }
+func (m *Manager) Skills() string           { return m.skills }
 func (m *Manager) System() string           { return m.system }
 func (m *Manager) SetSystem(s string)       { m.system = s }
 func (m *Manager) Len() int                 { return len(m.entries) }
@@ -217,6 +220,15 @@ func (m *Manager) BuildRequest(tools []llm.ToolDefinition) (llm.ChatRequest, Sna
 			tok:   m.est(m.instructions),
 			pin:   true,
 			order: 9000,
+		})
+	}
+	if trimSpace(m.skills) != "" {
+		parts = append(parts, part{
+			msg:   llm.Message{Role: llm.RoleSystem, Content: m.skills},
+			src:   SourceSkills,
+			tok:   m.est(m.skills),
+			pin:   true,
+			order: 8500,
 		})
 	}
 	for i, e := range m.entries {

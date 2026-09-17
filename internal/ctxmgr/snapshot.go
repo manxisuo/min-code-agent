@@ -14,6 +14,7 @@ type Source string
 const (
 	SourceSystem       Source = "system"
 	SourceInstructions Source = "instructions"
+	SourceSkills       Source = "skills"
 	SourceHistory      Source = "history"
 	SourceToolResult   Source = "tool_result"
 	SourceUserInput    Source = "user_input"

@@ -24,6 +24,7 @@ import (
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
 	"github.com/mincode/mincode/internal/session"
+	"github.com/mincode/mincode/internal/skill"
 	"github.com/mincode/mincode/internal/tools"
 )
 
@@ -50,6 +51,7 @@ type App struct {
 	sessionID string
 	workspace string
 	instr     *instruction.Loader
+	skills    *skill.Loader
 	out       io.Writer
 	echoTools atomic.Bool
 }
@@ -129,6 +131,15 @@ func NewApp(opts Options) (*App, error) {
 	}
 	ag.Instr = instrLoader
 
+	skillLoader, err := skill.NewLoader(workspace)
+	if err != nil {
+		_ = recorder.Close()
+		return nil, err
+	}
+	if _, err := skillLoader.Discover(); err != nil {
+		fmt.Fprintf(os.Stderr, "mincode: discover skills: %v\n", err)
+	}
+
 	sessions := session.NewStore(session.DefaultDir(workspace))
 
 	app := &App{
@@ -142,6 +153,7 @@ func NewApp(opts Options) (*App, error) {
 		sessionID: sessionID,
 		workspace: workspace,
 		instr:     instrLoader,
+		skills:    skillLoader,
 		out:       os.Stdout,
 	}
 
@@ -337,6 +349,9 @@ func (a *App) repl(ctx context.Context) error {
 	if n := a.instr.Count(); n > 0 {
 		fmt.Fprintf(a.out, "%s\n", bannerLine("instructions", fmt.Sprintf("%d AGENTS.md loaded", n)))
 	}
+	if n := len(a.skills.Available()); n > 0 {
+		fmt.Fprintf(a.out, "%s\n", bannerLine("skills", fmt.Sprintf("%d available (use /skills)", n)))
+	}
 	fmt.Fprintf(a.out, "Type a message, or %s for commands.\n\n", bold("/help"))
 
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "repl"})
@@ -511,6 +526,8 @@ func (a *App) handleCommand(line string) (quit bool) {
   /timeline          show agent execution timeline
   /context           show last context snapshot (what the model saw)
   /instructions      show loaded AGENTS.md project instructions
+  /skills            list available skills
+  /skill <name>      activate a skill (or /skill -<name> to deactivate)
   /trace [n]         show last n raw trace events (default 30)
   /metrics           show session token/time metrics
   /clear             clear conversation history
@@ -525,6 +542,10 @@ Trace file:
 		a.printContextSnapshot()
 	case "/instructions":
 		a.printInstructions()
+	case "/skills":
+		a.printSkills()
+	case "/skill":
+		a.handleSkillCommand(fields[1:])
 	case "/trace":
 		n := 30
 		if len(fields) > 1 {
@@ -634,6 +655,96 @@ func (a *App) printInstructions() {
 	fmt.Fprintln(a.out)
 }
 
+// printSkills lists discovered skills and which ones are active.
+func (a *App) printSkills() {
+	fmt.Fprintln(a.out)
+	if a.skills == nil {
+		fmt.Fprint(a.out, yellow("skills unavailable")+"\n\n")
+		return
+	}
+	available := a.skills.Available()
+	if len(available) == 0 {
+		fmt.Fprintf(a.out, "%s — put them in %s\n\n",
+			yellow("no skills found"), bold(filepath.ToSlash(filepath.Join(skill.DirName, "<name>", skill.FileName))))
+		return
+	}
+	fmt.Fprintf(a.out, "%s  %s\n\n", bold("Skills"),
+		gray(fmt.Sprintf("%d available  dir=%s", len(available), skill.DirName+"/")))
+	for _, s := range available {
+		mark := dim("○")
+		state := dim("inactive")
+		if a.skills.IsActive(s.Name) {
+			mark = green("●")
+			state = green("active")
+		}
+		fmt.Fprintf(a.out, "%s %s  %s\n", mark, padCol(bold(s.Name), 20), state)
+		if s.Summary != "" {
+			fmt.Fprintf(a.out, "    %s\n", dim(truncateStr(s.Summary, 72)))
+		}
+		fmt.Fprintf(a.out, "    %s\n", gray(s.RelPath))
+	}
+	if n := a.skills.CountActive(); n > 0 {
+		fmt.Fprintf(a.out, "\n%s  %s\n",
+			padCol(cyan("In context"), 14),
+			gray(fmt.Sprintf("%d skill(s), %d chars", n, len(a.agent.Ctx.Skills()))))
+	}
+	fmt.Fprintf(a.out, "%s\n", gray("activate: /skill <name>    deactivate: /skill -<name>"))
+	fmt.Fprintln(a.out)
+}
+
+// handleSkillCommand activates or deactivates a skill: /skill name | /skill -name
+func (a *App) handleSkillCommand(args []string) {
+	if len(args) == 0 {
+		a.printSkills()
+		return
+	}
+	arg := args[0]
+	if strings.HasPrefix(arg, "-") {
+		name := strings.TrimPrefix(arg, "-")
+		if name == "" {
+			fmt.Fprintf(a.out, "%s usage: /skill -<name>\n", yellow("usage:"))
+			return
+		}
+		if !a.skills.Deactivate(name) {
+			fmt.Fprintf(a.out, "%s skill %s is not active\n", yellow("warn"), bold(name))
+			return
+		}
+		a.syncSkillsToContext()
+		a.emit(observability.EventSkillUnloaded, observability.SkillEventData{
+			Name:   name,
+			Reason: "user command",
+		})
+		fmt.Fprintf(a.out, "%s deactivated %s\n", green("ok"), bold(name))
+		return
+	}
+
+	s, newly, err := a.skills.Activate(arg)
+	if err != nil {
+		fmt.Fprintf(a.out, "%s %v\n", red("error:"), err)
+		return
+	}
+	a.syncSkillsToContext()
+	if newly {
+		a.emit(observability.EventSkillLoaded, observability.SkillEventData{
+			Name:    s.Name,
+			RelPath: s.RelPath,
+			Bytes:   len(s.Content),
+			Summary: s.Summary,
+			Reason:  "user command",
+		})
+		fmt.Fprintf(a.out, "%s activated %s  (%s)\n", green("ok"), bold(s.Name), gray(s.RelPath))
+	} else {
+		fmt.Fprintf(a.out, "%s skill %s is already active\n", yellow("info"), bold(s.Name))
+	}
+}
+
+func (a *App) syncSkillsToContext() {
+	if a.skills == nil {
+		return
+	}
+	a.agent.Ctx.SetSkills(a.skills.Compose())
+}
+
 func formatSnapshot(s ctxmgr.Snapshot) string {
 	var b strings.Builder
 	b.WriteString(bold("Context Snapshot #"+fmt.Sprint(s.Step)) + "\n\n")
@@ -708,6 +819,8 @@ func paintSource(src string) string {
 		return bold(magenta(src))
 	case "instructions":
 		return magenta(src)
+	case "skills":
+		return yellow(src)
 	case "user_input":
 		return green(src)
 	case "history":
@@ -850,6 +963,14 @@ func timelineLine(e observability.Event) (string, bool) {
 		data := mapFromAny(e.Data)
 		rel, _ := data["rel_path"].(string)
 		return fmt.Sprintf("%s  %s %s", ts, magenta("Instructions"), bold(rel)), true
+	case observability.EventSkillLoaded:
+		data := mapFromAny(e.Data)
+		name, _ := data["name"].(string)
+		return fmt.Sprintf("%s  %s %s", ts, yellow("Skill Loaded"), bold(name)), true
+	case observability.EventSkillUnloaded:
+		data := mapFromAny(e.Data)
+		name, _ := data["name"].(string)
+		return fmt.Sprintf("%s  %s %s", ts, dim("Skill Unloaded"), bold(name)), true
 	}
 	return "", false
 }
@@ -942,6 +1063,10 @@ func formatEvent(e observability.Event) string {
 		return fmt.Sprintf("%s  %v  %v", base, data["tool"], red(fmt.Sprint(data["error"])))
 	case observability.EventInstructionLoaded:
 		return fmt.Sprintf("%s  %v  %v bytes", base, data["rel_path"], data["bytes"])
+	case observability.EventSkillLoaded:
+		return fmt.Sprintf("%s  %v  %v bytes", base, data["name"], data["bytes"])
+	case observability.EventSkillUnloaded:
+		return fmt.Sprintf("%s  %v", base, data["name"])
 	}
 	return base
 }
@@ -964,6 +1089,8 @@ func paintEventType(typ string) string {
 		return magenta(typ)
 	case typ == "instruction.loaded":
 		return magenta(typ)
+	case typ == "skill.loaded" || typ == "skill.unloaded":
+		return yellow(typ)
 	case strings.HasPrefix(typ, "llm."):
 		return magenta(typ)
 	case strings.HasPrefix(typ, "tool."):
