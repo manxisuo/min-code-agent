@@ -4,6 +4,7 @@
 
 # Runtime artifacts
 .mincode/
+exports/
 
 # Go
 *.test

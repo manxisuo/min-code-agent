@@ -634,6 +634,7 @@ func (a *App) handleCommand(ctx context.Context, line string) (quit bool) {
   /skill <name>      activate a skill (or /skill -<name> to deactivate)
   /memory            show project memory (MEMORY.md)
   /memory add <fact> append a durable fact to MEMORY.md
+  /export [path]     export conversation as Markdown (default: exports/<session-id>.md)
   /plan <goal>       draft a plan for a task
   /plan              show current plan
   /plan approve      run the approved plan step by step (Ctrl+C to stop mid-run)
@@ -659,6 +660,8 @@ Trace file:
 		a.handleSkillCommand(fields[1:])
 	case "/memory":
 		a.handleMemoryCommand(fields[1:])
+	case "/export":
+		a.handleExportCommand(fields[1:])
 	case "/plan":
 		a.handlePlanCommand(ctx, fields[1:])
 	case "/trace":
@@ -906,6 +909,48 @@ func (a *App) printMemory() {
 	fmt.Fprintf(a.out, "%s  %s\n\n", bold("Project Memory"), gray(a.mem.Path()))
 	fmt.Fprintln(a.out, content)
 	fmt.Fprintln(a.out)
+}
+
+// handleExportCommand: /export [path]
+func (a *App) handleExportCommand(args []string) {
+	path := defaultExportPath(a.workspace, a.sessionID)
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		p := strings.TrimSpace(args[0])
+		if filepath.IsAbs(p) {
+			path = p
+		} else {
+			// Relative paths resolve inside the workspace.
+			abs, err := filepath.Abs(filepath.Join(a.workspace, p))
+			if err != nil {
+				fmt.Fprintf(a.out, "%s %v\n", red("error:"), err)
+				return
+			}
+			path = abs
+		}
+	}
+
+	meta := sessionExportMeta{
+		SessionID: a.sessionID,
+		Workspace: a.workspace,
+		Provider:  a.provider.Name(),
+		Model:     a.provider.Model(),
+		CreatedAt: time.Now().UTC(),
+	}
+	md := renderSessionMarkdown(meta, a.agent.Ctx.ExportEntries())
+	if err := writeExportFile(path, md); err != nil {
+		fmt.Fprintf(a.out, "%s export: %v\n", red("error:"), err)
+		return
+	}
+	rel := a.instrRel(path)
+	fmt.Fprintf(a.out, "%s exported %s  (%d bytes)\n", green("ok"), bold(rel), len(md))
+}
+
+func (a *App) instrRel(path string) string {
+	rel, err := filepath.Rel(a.workspace, path)
+	if err != nil {
+		return path
+	}
+	return filepath.ToSlash(rel)
 }
 
 // handlePlanCommand: /plan [goal | approve | reject | cancel | show]
