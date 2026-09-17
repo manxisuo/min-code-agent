@@ -116,7 +116,7 @@ func TestTimelineCommand(t *testing.T) {
 
 	var buf bytes.Buffer
 	app.out = &buf
-	quit := app.handleCommand("/timeline")
+	quit := app.handleCommand(context.Background(), "/timeline")
 	if quit {
 		t.Fatal("timeline should not quit")
 	}
@@ -133,7 +133,7 @@ func TestContextSnapshotCommand(t *testing.T) {
 	app, _ := newTestAppWithWorkspace(t)
 	var buf bytes.Buffer
 	app.out = &buf
-	app.handleCommand("/context")
+	app.handleCommand(context.Background(), "/context")
 	if !strings.Contains(buf.String(), "no context snapshot") {
 		t.Fatalf("empty state = %q", buf.String())
 	}
@@ -142,7 +142,7 @@ func TestContextSnapshotCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	buf.Reset()
-	app.handleCommand("/context")
+	app.handleCommand(context.Background(), "/context")
 	out := buf.String()
 	if !strings.Contains(out, "Context Snapshot") || !strings.Contains(out, "system") {
 		t.Fatalf("snapshot = %q", out)
@@ -183,7 +183,7 @@ func TestInstructionsLoadedAtStartup(t *testing.T) {
 
 	var buf bytes.Buffer
 	app.out = &buf
-	app.handleCommand("/instructions")
+	app.handleCommand(context.Background(), "/instructions")
 	out := buf.String()
 	if !strings.Contains(out, "AGENTS.md") || !strings.Contains(out, "Always cite paths") {
 		t.Fatalf("instructions cmd = %q", out)
@@ -221,7 +221,7 @@ func TestInstructionsLoadedAtStartup(t *testing.T) {
 	}
 
 	buf.Reset()
-	app.handleCommand("/timeline")
+	app.handleCommand(context.Background(), "/timeline")
 	if !strings.Contains(buf.String(), "Instructions") {
 		t.Fatalf("timeline missing instructions: %q", buf.String())
 	}

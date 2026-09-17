@@ -23,6 +23,7 @@ import (
 	"github.com/mincode/mincode/internal/instruction"
 	"github.com/mincode/mincode/internal/llm"
 	"github.com/mincode/mincode/internal/observability"
+	"github.com/mincode/mincode/internal/plan"
 	"github.com/mincode/mincode/internal/session"
 	"github.com/mincode/mincode/internal/skill"
 	"github.com/mincode/mincode/internal/tools"
@@ -52,6 +53,7 @@ type App struct {
 	workspace string
 	instr     *instruction.Loader
 	skills    *skill.Loader
+	plans     *plan.Manager
 	out       io.Writer
 	echoTools atomic.Bool
 }
@@ -154,6 +156,7 @@ func NewApp(opts Options) (*App, error) {
 		workspace: workspace,
 		instr:     instrLoader,
 		skills:    skillLoader,
+		plans:     plan.NewManager(),
 		out:       os.Stdout,
 	}
 
@@ -370,7 +373,7 @@ func (a *App) repl(ctx context.Context) error {
 		}
 
 		if strings.HasPrefix(line, "/") {
-			if quit := a.handleCommand(line); quit {
+			if quit := a.handleCommand(ctx, line); quit {
 				break
 			}
 			continue
@@ -515,7 +518,7 @@ func truncateUTF8(s string, max int) string {
 	return s[:end] + "..."
 }
 
-func (a *App) handleCommand(line string) (quit bool) {
+func (a *App) handleCommand(ctx context.Context, line string) (quit bool) {
 	fields := strings.Fields(strings.TrimSpace(line))
 	name := fields[0]
 
@@ -528,6 +531,11 @@ func (a *App) handleCommand(line string) (quit bool) {
   /instructions      show loaded AGENTS.md project instructions
   /skills            list available skills
   /skill <name>      activate a skill (or /skill -<name> to deactivate)
+  /plan <goal>       draft a plan for a task
+  /plan              show current plan
+  /plan approve      run the approved plan step by step
+  /plan reject       discard the draft plan
+  /plan cancel       cancel a running/approved plan
   /trace [n]         show last n raw trace events (default 30)
   /metrics           show session token/time metrics
   /clear             clear conversation history
@@ -546,6 +554,8 @@ Trace file:
 		a.printSkills()
 	case "/skill":
 		a.handleSkillCommand(fields[1:])
+	case "/plan":
+		a.handlePlanCommand(ctx, fields[1:])
 	case "/trace":
 		n := 30
 		if len(fields) > 1 {
@@ -743,6 +753,252 @@ func (a *App) syncSkillsToContext() {
 		return
 	}
 	a.agent.Ctx.SetSkills(a.skills.Compose())
+}
+
+// handlePlanCommand: /plan [goal | approve | reject | cancel | show]
+func (a *App) handlePlanCommand(ctx context.Context, args []string) {
+	if len(args) == 0 {
+		a.printCurrentPlan()
+		return
+	}
+	switch args[0] {
+	case "approve":
+		a.approveAndRunPlan(ctx)
+	case "reject":
+		a.rejectPlan()
+	case "cancel":
+		a.cancelPlan()
+	case "show", "status":
+		a.printCurrentPlan()
+	default:
+		goal := strings.TrimSpace(strings.Join(args, " "))
+		a.draftPlan(ctx, goal)
+	}
+}
+
+func (a *App) printCurrentPlan() {
+	fmt.Fprintln(a.out)
+	p := a.plans.Current()
+	if p == nil {
+		fmt.Fprint(a.out, yellow("no active plan")+" — use "+bold("/plan <goal>")+" to draft one\n\n")
+		return
+	}
+	fmt.Fprint(a.out, p.Format())
+	switch p.Status {
+	case plan.StatusDraft:
+		fmt.Fprintf(a.out, "\n%s  %s  %s\n",
+			gray("next:"), bold("/plan approve"), gray("or /plan reject"))
+	case plan.StatusApproved, plan.StatusRunning:
+		fmt.Fprintf(a.out, "\n%s  %s\n", gray("status:"), "running / use /plan cancel to stop")
+	}
+	fmt.Fprintln(a.out)
+}
+
+// draftPlan asks the LLM for a numbered step list and stores a draft plan.
+func (a *App) draftPlan(ctx context.Context, goal string) {
+	if goal == "" {
+		fmt.Fprintf(a.out, "%s usage: /plan <goal>\n", yellow("usage:"))
+		return
+	}
+	fmt.Fprintf(a.out, "%s drafting plan for: %s\n", cyan("plan"), bold(goal))
+
+	req := llm.ChatRequest{
+		Messages: []llm.Message{
+			{
+				Role: llm.RoleSystem,
+				Content: `You break a coding task into a short numbered execution plan.
+Output ONLY a numbered list (3-8 steps). Each step is one concrete action.
+No prose before or after the list. No nested sub-steps.
+Example:
+1. Read the main router file
+2. Add a /health handler
+3. Write unit tests for /health
+4. Run go test ./...`,
+			},
+			{Role: llm.RoleUser, Content: goal},
+		},
+	}
+
+	a.emit(observability.EventPlanCreated, observability.PlanEventData{
+		Goal:   goal,
+		Status: string(plan.StatusDraft),
+		Reason: "generating",
+	})
+
+	resp, err := a.provider.Chat(ctx, req)
+	if err != nil {
+		fmt.Fprintf(a.out, "%s plan generation failed: %v\n", red("error:"), err)
+		return
+	}
+	titles := plan.ParseStepList(resp.Content)
+	if len(titles) == 0 {
+		fmt.Fprintf(a.out, "%s model returned no parseable steps:\n%s\n", red("error:"), truncateStr(resp.Content, 300))
+		return
+	}
+	if len(titles) > 8 {
+		titles = titles[:8]
+	}
+
+	id := "plan-" + time.Now().UTC().Format("150405")
+	p := plan.NewPlan(id, goal, titles)
+	a.plans.SetCurrent(p)
+
+	a.emit(observability.EventPlanCreated, observability.PlanEventData{
+		PlanID:    p.ID,
+		Goal:      goal,
+		Status:    string(p.Status),
+		StepCount: len(p.Steps),
+	})
+
+	fmt.Fprintln(a.out)
+	fmt.Fprint(a.out, p.Format())
+	fmt.Fprintf(a.out, "\n%s  %s   %s\n",
+		gray("next:"), bold("/plan approve"), gray("to execute   |   /plan reject   to discard"))
+	fmt.Fprintln(a.out)
+}
+
+func (a *App) rejectPlan() {
+	p := a.plans.Current()
+	if p == nil {
+		fmt.Fprintf(a.out, "%s no active plan\n", yellow("warn"))
+		return
+	}
+	if err := p.Reject(); err != nil {
+		fmt.Fprintf(a.out, "%s %v\n", red("error:"), err)
+		return
+	}
+	a.emit(observability.EventPlanRejected, observability.PlanEventData{
+		PlanID: p.ID,
+		Goal:   p.Goal,
+		Status: string(p.Status),
+	})
+	a.plans.Clear()
+	fmt.Fprintf(a.out, "%s plan rejected\n", green("ok"))
+}
+
+func (a *App) cancelPlan() {
+	p := a.plans.Current()
+	if p == nil {
+		fmt.Fprintf(a.out, "%s no active plan\n", yellow("warn"))
+		return
+	}
+	p.Cancel()
+	a.emit(observability.EventPlanCancelled, observability.PlanEventData{
+		PlanID: p.ID,
+		Goal:   p.Goal,
+		Status: string(p.Status),
+	})
+	fmt.Fprintf(a.out, "%s plan cancelled (%s)\n", yellow("ok"), p.Status)
+}
+
+// approveAndRunPlan approves the draft and executes steps sequentially.
+func (a *App) approveAndRunPlan(ctx context.Context) {
+	p := a.plans.Current()
+	if p == nil {
+		fmt.Fprintf(a.out, "%s no active plan — draft one with /plan <goal>\n", yellow("warn"))
+		return
+	}
+	if err := p.Approve(); err != nil {
+		fmt.Fprintf(a.out, "%s %v\n", red("error:"), err)
+		return
+	}
+	a.emit(observability.EventPlanApproved, observability.PlanEventData{
+		PlanID:    p.ID,
+		Goal:      p.Goal,
+		Status:    string(p.Status),
+		StepCount: len(p.Steps),
+	})
+	fmt.Fprintf(a.out, "%s executing plan %s (%d steps)\n\n", green("ok"), bold(p.ID), len(p.Steps))
+
+	a.echoTools.Store(true)
+	defer a.echoTools.Store(false)
+
+	for i := range p.Steps {
+		if err := ctx.Err(); err != nil {
+			p.Cancel()
+			fmt.Fprintf(a.out, "\n%s cancelled: %v\n", yellow("plan"), err)
+			return
+		}
+		if p.Status == plan.StatusCancelled {
+			fmt.Fprintf(a.out, "\n%s stopped before step %d\n", yellow("plan"), i+1)
+			return
+		}
+
+		step := p.Steps[i]
+		if err := p.StartStep(step.Index); err != nil {
+			fmt.Fprintf(a.out, "%s %v\n", red("error:"), err)
+			return
+		}
+		a.emit(observability.EventPlanStepStarted, observability.PlanEventData{
+			PlanID:    p.ID,
+			StepIndex: step.Index,
+			StepTitle: step.Title,
+			StepCount: len(p.Steps),
+			DoneCount: i,
+		})
+		fmt.Fprintf(a.out, "%s step %d/%d %s\n",
+			cyan("→"), step.Index, len(p.Steps), bold(step.Title))
+
+		prompt := fmt.Sprintf(
+			"You are executing step %d of %d of an approved plan.\n"+
+				"Overall goal: %s\n"+
+				"Current step: %s\n\n"+
+				"Complete only this step using tools as needed. "+
+				"When finished, reply with a one-line summary of what you did.",
+			step.Index, len(p.Steps), p.Goal, step.Title,
+		)
+
+		res, err := a.agent.Run(ctx, prompt)
+		if err != nil {
+			_ = p.FailStep(step.Index, err.Error())
+			done, total := p.Progress()
+			a.emit(observability.EventPlanStepFailed, observability.PlanEventData{
+				PlanID:    p.ID,
+				StepIndex: step.Index,
+				StepTitle: step.Title,
+				Error:     err.Error(),
+				DoneCount: done,
+				StepCount: total,
+			})
+			fmt.Fprintf(a.out, "%s step %d failed: %v\n", red("✗"), step.Index, err)
+			return
+		}
+
+		summary := strings.TrimSpace(res.Final)
+		if summary == "" {
+			summary = "ok"
+		}
+		if len(summary) > 120 {
+			summary = truncateStr(summary, 120)
+		}
+		_ = p.CompleteStep(step.Index, summary)
+		done, total := p.Progress()
+		a.emit(observability.EventPlanStepFinished, observability.PlanEventData{
+			PlanID:    p.ID,
+			StepIndex: step.Index,
+			StepTitle: step.Title,
+			Result:    summary,
+			DoneCount: done,
+			StepCount: total,
+		})
+		fmt.Fprintf(a.out, "%s step %d done  %s\n\n", green("✓"), step.Index, gray(summary))
+	}
+
+	p.Finish()
+	done, total := p.Progress()
+	a.emit(observability.EventPlanFinished, observability.PlanEventData{
+		PlanID:    p.ID,
+		Goal:      p.Goal,
+		Status:    string(p.Status),
+		DoneCount: done,
+		StepCount: total,
+	})
+	fmt.Fprintln(a.out)
+	fmt.Fprint(a.out, p.Format())
+	if p.Status == plan.StatusDone {
+		fmt.Fprintf(a.out, "\n%s plan %s complete\n", green("ok"), bold(p.ID))
+	}
+	fmt.Fprintln(a.out)
 }
 
 func formatSnapshot(s ctxmgr.Snapshot) string {
@@ -971,6 +1227,41 @@ func timelineLine(e observability.Event) (string, bool) {
 		data := mapFromAny(e.Data)
 		name, _ := data["name"].(string)
 		return fmt.Sprintf("%s  %s %s", ts, dim("Skill Unloaded"), bold(name)), true
+	case observability.EventPlanCreated:
+		data := mapFromAny(e.Data)
+		goal, _ := data["goal"].(string)
+		if id, _ := data["plan_id"].(string); id != "" {
+			return fmt.Sprintf("%s  %s %s", ts, yellow("Plan Created"), bold(id)) + gray(" "+truncateStr(goal, 48)), true
+		}
+		return fmt.Sprintf("%s  %s %s", ts, yellow("Plan Drafting"), gray(truncateStr(goal, 48))), true
+	case observability.EventPlanApproved:
+		data := mapFromAny(e.Data)
+		id, _ := data["plan_id"].(string)
+		return fmt.Sprintf("%s  %s %s steps=%v", ts, green("Plan Approved"), bold(id), data["step_count"]), true
+	case observability.EventPlanRejected:
+		data := mapFromAny(e.Data)
+		id, _ := data["plan_id"].(string)
+		return fmt.Sprintf("%s  %s %s", ts, red("Plan Rejected"), id), true
+	case observability.EventPlanCancelled:
+		data := mapFromAny(e.Data)
+		id, _ := data["plan_id"].(string)
+		return fmt.Sprintf("%s  %s %s", ts, yellow("Plan Cancelled"), id), true
+	case observability.EventPlanStepStarted:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v/%v %v", ts, cyan("Plan Step"),
+			data["step_index"], data["step_count"], data["step_title"]), true
+	case observability.EventPlanStepFinished:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v/%v %v", ts, green("Plan Step OK"),
+			data["step_index"], data["step_count"], data["step_title"]), true
+	case observability.EventPlanStepFailed:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v/%v %v", ts, red("Plan Step Fail"),
+			data["step_index"], data["step_count"], data["step_title"]), true
+	case observability.EventPlanFinished:
+		data := mapFromAny(e.Data)
+		return fmt.Sprintf("%s  %s %v status=%v", ts, bold("Plan Finished"),
+			data["plan_id"], data["status"]), true
 	}
 	return "", false
 }
@@ -1090,6 +1381,8 @@ func paintEventType(typ string) string {
 	case typ == "instruction.loaded":
 		return magenta(typ)
 	case typ == "skill.loaded" || typ == "skill.unloaded":
+		return yellow(typ)
+	case strings.HasPrefix(typ, "plan."):
 		return yellow(typ)
 	case strings.HasPrefix(typ, "llm."):
 		return magenta(typ)

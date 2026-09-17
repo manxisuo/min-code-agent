@@ -52,7 +52,7 @@ func TestSkillsDiscoveredAtStartup(t *testing.T) {
 
 	var buf bytes.Buffer
 	app.out = &buf
-	app.handleCommand("/skills")
+	app.handleCommand(context.Background(), "/skills")
 	out := buf.String()
 	if !strings.Contains(out, "go-testing") || !strings.Contains(out, "inactive") {
 		t.Fatalf("skills list = %q", out)
@@ -64,7 +64,7 @@ func TestSkillActivateDeactivate(t *testing.T) {
 	var buf bytes.Buffer
 	app.out = &buf
 
-	app.handleCommand("/skill go-testing")
+	app.handleCommand(context.Background(), "/skill go-testing")
 	out := buf.String()
 	if !strings.Contains(out, "activated") {
 		t.Fatalf("activate = %q", out)
@@ -77,13 +77,13 @@ func TestSkillActivateDeactivate(t *testing.T) {
 	}
 
 	buf.Reset()
-	app.handleCommand("/skill go-testing")
+	app.handleCommand(context.Background(), "/skill go-testing")
 	if !strings.Contains(buf.String(), "already active") {
 		t.Fatalf("re-activate = %q", buf.String())
 	}
 
 	buf.Reset()
-	app.handleCommand("/skill -go-testing")
+	app.handleCommand(context.Background(), "/skill -go-testing")
 	if !strings.Contains(buf.String(), "deactivated") {
 		t.Fatalf("deactivate = %q", buf.String())
 	}
@@ -113,7 +113,7 @@ func TestSkillUnknownName(t *testing.T) {
 	app, _ := newAppWithSkills(t)
 	var buf bytes.Buffer
 	app.out = &buf
-	app.handleCommand("/skill does-not-exist")
+	app.handleCommand(context.Background(), "/skill does-not-exist")
 	if !strings.Contains(buf.String(), "not found") {
 		t.Fatalf("unknown skill = %q", buf.String())
 	}
@@ -123,7 +123,7 @@ func TestSkillsEnterContextSnapshot(t *testing.T) {
 	app, _ := newAppWithSkills(t)
 	var buf bytes.Buffer
 	app.out = &buf
-	app.handleCommand("/skill go-testing")
+	app.handleCommand(context.Background(), "/skill go-testing")
 
 	fake := &llm.FakeProvider{Responses: []llm.ChatResponse{{Content: "ok"}}}
 	app.agent.Provider = fake
@@ -146,13 +146,13 @@ func TestSkillsEnterContextSnapshot(t *testing.T) {
 	}
 
 	buf.Reset()
-	app.handleCommand("/context")
+	app.handleCommand(context.Background(), "/context")
 	if !strings.Contains(buf.String(), "skills") {
 		t.Fatalf("context snapshot missing skills source: %q", buf.String())
 	}
 
 	buf.Reset()
-	app.handleCommand("/timeline")
+	app.handleCommand(context.Background(), "/timeline")
 	if !strings.Contains(buf.String(), "Skill Loaded") {
 		t.Fatalf("timeline missing skill: %q", buf.String())
 	}
