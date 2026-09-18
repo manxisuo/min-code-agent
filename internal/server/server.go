@@ -138,6 +138,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/sessions", s.handleSessionList)
 	mux.HandleFunc("GET /api/sessions/current", s.handleSessionCurrent)
 	mux.HandleFunc("POST /api/sessions/{id}/load", s.handleSessionLoad)
+	mux.HandleFunc("POST /api/export", s.handleExportWrite)
+	mux.HandleFunc("GET /api/export", s.handleExportGet)
+	mux.HandleFunc("GET /api/export/download", s.handleExportDownload)
 	mux.HandleFunc("GET /api/permissions/pending", s.handlePermissionPending)
 	mux.HandleFunc("POST /api/permissions/{id}", s.handlePermissionDecide)
 

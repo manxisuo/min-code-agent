@@ -48,6 +48,35 @@ const meta = computed(() => {
   return `${s.session_id} · ${s.provider}/${s.model} · ${s.workspace}`;
 });
 const themeLabel = computed(() => (theme.value === "dark" ? "Light" : "Dark"));
+const exportNote = ref("");
+const exportBusy = ref(false);
+
+async function exportMarkdown(download: boolean) {
+  if (download) {
+    window.open("/api/export/download", "_blank");
+    return;
+  }
+  exportBusy.value = true;
+  exportNote.value = "";
+  try {
+    const res = await fetch("/api/export", { method: "POST" });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      rel?: string;
+      path?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      exportNote.value = data.error || res.statusText;
+      return;
+    }
+    exportNote.value = `已导出 ${data.rel || data.path}`;
+  } catch (e) {
+    exportNote.value = String((e as Error).message || e);
+  } finally {
+    exportBusy.value = false;
+  }
+}
 
 function onInput(v: string) {
   input.value = v;
@@ -71,7 +100,7 @@ async function onSwitchSession(id: string) {
         <span class="logo">MC</span>
         <div>
           <strong>MinCode Inspector</strong>
-          <div class="meta">{{ meta }}</div>
+          <div class="meta">{{ exportNote || meta }}</div>
         </div>
       </div>
       <div class="top-right">
@@ -128,6 +157,23 @@ async function onSwitchSession(id: string) {
         </nav>
         <button type="button" class="theme-btn" :title="'切换到' + themeLabel + '主题'" @click="toggle()">
           {{ theme === "dark" ? "🌙" : "☀" }} {{ themeLabel }}
+        </button>
+        <button
+          type="button"
+          class="theme-btn"
+          title="导出到 workspace/exports/*.md"
+          :disabled="exportBusy"
+          @click="exportMarkdown(false)"
+        >
+          Export
+        </button>
+        <button
+          type="button"
+          class="theme-btn"
+          title="浏览器下载 Markdown"
+          @click="exportMarkdown(true)"
+        >
+          ↓MD
         </button>
         <span class="pill" :data-state="stateLabel">{{ stateLabel }}</span>
         <button type="button" :disabled="!running" @click="cancel()">Cancel</button>
