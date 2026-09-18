@@ -6,7 +6,6 @@ import (
 )
 
 func TestProjectIDCollisionAvoidance(t *testing.T) {
-	// Classic dash-collision case.
 	a := ProjectID(`D:\A-B\C`)
 	b := ProjectID(`D:\A\B-C`)
 	if a == b {
@@ -35,21 +34,15 @@ func TestResolveGlobal(t *testing.T) {
 	if !strings.HasPrefix(l.TracesDir, l.ProjectDir) {
 		t.Fatalf("traces = %s", l.TracesDir)
 	}
-	if l.LegacyTraces == "" || !strings.Contains(l.LegacyTraces, ".mincode") {
-		t.Fatalf("legacy traces = %s", l.LegacyTraces)
-	}
-	if len(l.TraceSearchDirs()) < 2 {
-		t.Fatalf("search dirs = %v", l.TraceSearchDirs())
+	if strings.Contains(l.TracesDir, "/tmp/demo/") {
+		t.Fatalf("global traces must not live under workspace: %s", l.TracesDir)
 	}
 }
 
 func TestResolveWorkspace(t *testing.T) {
 	l := Resolve(`/tmp/demo`, LocationWorkspace, "")
-	if !strings.HasSuffix(l.TracesDir, `traces`) {
+	if !strings.HasSuffix(l.TracesDir, ".mincode") && !strings.Contains(l.TracesDir, ".mincode") {
 		t.Fatalf("traces = %s", l.TracesDir)
-	}
-	if len(l.TraceSearchDirs()) != 1 {
-		t.Fatalf("workspace mode should not duplicate legacy: %v", l.TraceSearchDirs())
 	}
 }
 

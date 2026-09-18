@@ -4,7 +4,6 @@
 
 # Runtime artifacts
 .mincode/
-exports/
 
 # Local provider secrets / machine-specific config (copy from mincode.example.yaml)
 mincode.yaml

@@ -96,13 +96,9 @@ func (a *App) resolveTracePath(ref string) (string, error) {
 		}
 	}
 	layout := paths.Resolve(a.workspace, a.cfg.Data.Location, a.cfg.Data.Root)
-	candidates := []string{}
-	for _, dir := range layout.TraceSearchDirs() {
-		candidates = append(candidates, filepath.Join(dir, ref+".jsonl"))
+	candidates := []string{
+		filepath.Join(layout.TracesDir, ref+".jsonl"),
 	}
-	candidates = append(candidates,
-		filepath.Join(".mincode", "traces", ref+".jsonl"),
-	)
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c, nil

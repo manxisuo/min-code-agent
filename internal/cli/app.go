@@ -105,12 +105,8 @@ func NewApp(opts Options) (*App, error) {
 		return nil, err
 	}
 	traceDir := layout.TracesDir
-	// Absolute MINCODE_TRACE_DIR / trace.dir still wins as an explicit override.
-	if cfg.Trace.Dir != "" && filepath.IsAbs(cfg.Trace.Dir) {
-		traceDir = cfg.Trace.Dir
-		if err := config.EnsureTraceDir(traceDir); err != nil {
-			return nil, err
-		}
+	if err := config.EnsureTraceDir(traceDir); err != nil {
+		return nil, err
 	}
 	tracePath := config.TracePath(traceDir, sessionID)
 	recorder, err := observability.NewRecorder(tracePath)

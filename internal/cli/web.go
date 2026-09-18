@@ -75,11 +75,8 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		return err
 	}
 	traceDir := layout.TracesDir
-	if cfg.Trace.Dir != "" && filepath.IsAbs(cfg.Trace.Dir) {
-		traceDir = cfg.Trace.Dir
-		if err := config.EnsureTraceDir(traceDir); err != nil {
-			return err
-		}
+	if err := config.EnsureTraceDir(traceDir); err != nil {
+		return err
 	}
 	tracePath := config.TracePath(traceDir, sessionID)
 	recorder, err := observability.NewRecorder(tracePath)
@@ -155,20 +152,19 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		addr = "127.0.0.1:8080"
 	}
 
-	expStore, expErr := experiment.NewStoreFromRoots(layout.ExperimentSearchDirs()...)
+	expStore, expErr := experiment.NewStore(layout.Experiments)
 	if expErr != nil {
 		fmt.Fprintf(os.Stderr, "mincode web: experiment store: %v\n", expErr)
 		expStore = nil
 	}
 
 	srv := server.New(server.Options{
-		Addr:          addr,
-		Workspace:     workspace,
-		SessionID:     sessionID,
-		Provider:      provider.Name(),
-		Model:         provider.Model(),
-		TraceDir:      traceDir,
-		TraceDirExtra: layout.LegacyTraces,
+		Addr:      addr,
+		Workspace: workspace,
+		SessionID: sessionID,
+		Provider:  provider.Name(),
+		Model:     provider.Model(),
+		TraceDir:  traceDir,
 	}, ag, bus, metrics, expStore)
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,
@@ -182,8 +178,11 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 	fmt.Printf("  workspace  %s\n", workspace)
 	fmt.Printf("  provider   %s / %s\n", provider.Name(), provider.Model())
 	fmt.Printf("  session    %s\n", sessionID)
-	fmt.Printf("  trace      %s\n", tracePath)
+	fmt.Printf("  data       %s  project_id=%s\n", layout.Location, layout.ProjectID)
+	fmt.Printf("  traces     %s\n", traceDir)
+	fmt.Printf("  trace file %s\n", tracePath)
 	fmt.Printf("  listening  http://%s\n", addr)
+	fmt.Printf("  note       仅读写上述 data 目录；不兼容旧 workspace/.mincode\n")
 	fmt.Printf("  note       W1 本地单用户；Ask 级写操作自动批准（危险 shell 仍拒绝）\n\n")
 
 	return srv.ListenAndServe(ctx)

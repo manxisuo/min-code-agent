@@ -5,6 +5,11 @@ export async function fetchJSON<T>(url: string, opts?: RequestInit): Promise<T> 
   const data = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) {
     const err = (data as { error?: string }).error || res.statusText;
+    if (res.status === 404) {
+      throw new Error(
+        `${err} — API ${url} 不可用。请用最新构建的 mincode 重启（cd 项目后 go build -o mincode.exe ./cmd/mincode）`,
+      );
+    }
     throw new Error(err);
   }
   return data;

@@ -69,9 +69,6 @@ func applyEnv(cfg *Config) {
 	if v := firstEnv("MINCODE_MODEL", "OPENAI_MODEL"); v != "" {
 		cfg.Provider.Model = v
 	}
-	if v := os.Getenv("MINCODE_TRACE_DIR"); v != "" {
-		cfg.Trace.Dir = v
-	}
 	if v := os.Getenv("MINCODE_MAX_TOKENS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			cfg.Provider.MaxTokens = n
@@ -130,9 +127,6 @@ func normalize(cfg *Config) {
 	}
 	if cfg.Agent.MaxParallel <= 0 {
 		cfg.Agent.MaxParallel = 4
-	}
-	if cfg.Trace.Dir == "" {
-		cfg.Trace.Dir = ".mincode/traces"
 	}
 	if cfg.Data.Location == "" {
 		cfg.Data.Location = "global"

@@ -5,7 +5,6 @@ type Config struct {
 	Provider ProviderConfig `yaml:"provider"`
 	Agent    AgentConfig    `yaml:"agent"`
 	Memory   MemoryConfig   `yaml:"memory"`
-	Trace    TraceConfig    `yaml:"trace"`
 	Data     DataConfig     `yaml:"data"`
 }
 
@@ -32,15 +31,9 @@ type AgentConfig struct {
 	// CompressAt triggers history compaction when estimated history tokens exceed this (0 disables).
 	CompressAt int `yaml:"compress_at"`
 	// ParallelTools enables concurrent read-only tool calls (default true).
-	// YAML bool defaults to false when omitted, so we track with *bool.
 	ParallelTools *bool `yaml:"parallel_tools"`
 	// MaxParallel caps concurrent read-only tools (0 = default 4).
 	MaxParallel int `yaml:"max_parallel"`
-}
-
-// TraceConfig controls where JSONL traces are written.
-type TraceConfig struct {
-	Dir string `yaml:"dir"`
 }
 
 // MemoryConfig controls cross-session MEMORY.md behavior.
@@ -51,10 +44,11 @@ type MemoryConfig struct {
 }
 
 // DataConfig controls where runtime data (traces/sessions/experiments) is stored.
+// There are no per-kind path overrides — all three follow Location.
 type DataConfig struct {
 	// Location is "global" (default) or "workspace".
-	// global: {home}/.mincode/projects/{slug}-{hash8}/...
-	// workspace: {workspace}/.mincode/...
+	// global: {home}/.mincode/projects/{slug}-{hash8}/{traces,sessions,experiments}
+	// workspace: {workspace}/.mincode/{traces,sessions,experiments}
 	Location string `yaml:"location"`
 	// Root overrides the global data root (default {home}/.mincode).
 	Root string `yaml:"root"`
@@ -82,9 +76,6 @@ func Default() Config {
 		},
 		Data: DataConfig{
 			Location: "global",
-		},
-		Trace: TraceConfig{
-			Dir: ".mincode/traces",
 		},
 	}
 }

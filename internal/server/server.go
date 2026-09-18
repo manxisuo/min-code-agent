@@ -24,10 +24,8 @@ type Options struct {
 	SessionID string
 	Provider  string
 	Model     string
-	// TraceDir is the primary directory for session JSONL traces.
+	// TraceDir is the only directory used for session JSONL traces.
 	TraceDir string
-	// TraceDirExtra is an optional legacy directory merged when listing/reading traces.
-	TraceDirExtra string
 }
 
 // Server exposes Agent runtime over HTTP + SSE for the local Web UI.

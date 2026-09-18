@@ -129,6 +129,7 @@ const histMeta = ref({ total: 0, shown: 0, path: "", dir: "" });
 const tlError = ref("");
 const tlLoading = ref(false);
 const tlDir = ref("");
+const tlDirs = ref<string[]>([]);
 
 const displayEvents = computed(() =>
   tlMode.value === "live" ? props.events : histEvents.value,
@@ -140,9 +141,11 @@ async function loadTraceList() {
     const data = await apiTraces();
     traces.value = data.traces || [];
     tlDir.value = data.dir || "";
+    tlDirs.value = data.dirs || (data.dir ? [data.dir] : []);
   } catch (e) {
     tlError.value = String((e as Error).message || e);
     traces.value = [];
+    tlDirs.value = [];
   }
 }
 
@@ -343,8 +346,9 @@ function rawJson(e: RuntimeEvent) {
         <input v-model="showRawJson" type="checkbox" /> JSON
       </label>
     </div>
-    <div v-if="tlMode === 'history' && (tlDir || histMeta.total)" class="tl-history-meta">
-      dir: {{ tlDir || histMeta.path || "—" }} · {{ traces.length }} files
+    <div v-if="tlMode === 'history' && (tlDirs.length || tlDir || histMeta.total)" class="tl-history-meta">
+      {{ (tlDirs.length ? tlDirs : [tlDir]).filter(Boolean).join(" | ") }}
+      · {{ traces.length }} files
       <template v-if="histMeta.total || histMeta.shown">
         · showing {{ histMeta.shown }} / {{ histMeta.total }} events
       </template>
@@ -358,9 +362,11 @@ function rawJson(e: RuntimeEvent) {
             ? "等待事件…"
             : tlLoading
               ? "加载中…"
-              : traces.length
-                ? `无事件（trace=${traceId || "—"}）`
-                : `目录下无 .jsonl：${tlDir || "…"}`
+              : tlError
+                ? "History 加载失败（见上方错误）"
+                : traces.length
+                  ? `无事件（trace=${traceId || "—"}）`
+                  : `目录下无 .jsonl：${(tlDirs.length ? tlDirs : [tlDir || "…"]).join(" | ")}`
         }}
       </div>
       <template v-else>

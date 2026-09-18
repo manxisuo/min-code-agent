@@ -11,9 +11,6 @@ func TestDefault(t *testing.T) {
 	if cfg.Provider.Type != "openai-compatible" {
 		t.Fatalf("type = %q", cfg.Provider.Type)
 	}
-	if cfg.Trace.Dir != ".mincode/traces" {
-		t.Fatalf("trace dir = %q", cfg.Trace.Dir)
-	}
 	if cfg.Agent.MaxSteps != 30 {
 		t.Fatalf("max steps = %d", cfg.Agent.MaxSteps)
 	}
@@ -37,8 +34,8 @@ provider:
   type: fake
   model: scripted-model
   base_url: http://localhost:1234/v1
-trace:
-  dir: custom/traces
+data:
+  location: workspace
 `
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
@@ -62,10 +59,10 @@ trace:
 		t.Fatalf("api key = %q", cfg.Provider.APIKey)
 	}
 	if cfg.Provider.BaseURL != "http://localhost:1234/v1" {
-		t.Fatalf("base url = %q", cfg.Provider.BaseURL)
+		t.Fatalf("base_url = %q", cfg.Provider.BaseURL)
 	}
-	if cfg.Trace.Dir != "custom/traces" {
-		t.Fatalf("trace dir = %q", cfg.Trace.Dir)
+	if cfg.Data.Location != "workspace" {
+		t.Fatalf("data.location = %q", cfg.Data.Location)
 	}
 }
 

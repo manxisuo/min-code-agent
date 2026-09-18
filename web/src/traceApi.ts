@@ -7,12 +7,16 @@ export interface TraceListItem {
   size: number;
   mod_time: string;
   is_current: boolean;
+  source?: string;
 }
 
 export function apiTraces() {
-  return fetchJSON<{ dir: string; traces: TraceListItem[]; session: string }>(
-    "/api/traces",
-  );
+  return fetchJSON<{
+    dir: string;
+    dirs?: string[];
+    traces: TraceListItem[];
+    session: string;
+  }>("/api/traces");
 }
 
 export function apiTrace(id: string, opts?: { type?: string; limit?: number }) {

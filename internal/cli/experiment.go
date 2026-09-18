@@ -59,7 +59,7 @@ Run flags:
 Results:
   global (default): {home}/.mincode/projects/{project-id}/experiments/
   workspace:        {workspace}/.mincode/experiments/
-  (legacy workspace dirs are still readable)
+  仅使用上述单一目录，不合并读取另一布局。
 `
 
 // experimentLayout resolves data dirs using workspace config + defaults.
@@ -73,7 +73,7 @@ func experimentLayout(workspace, configPath string) paths.Layout {
 
 func openExperimentStore(workspace, configPath string) (*experiment.Store, error) {
 	l := experimentLayout(workspace, configPath)
-	return experiment.NewStoreFromRoots(l.ExperimentSearchDirs()...)
+	return experiment.NewStoreAt(l.Experiments)
 }
 
 func experimentRun(argv []string, out io.Writer) int {

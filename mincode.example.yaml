@@ -97,17 +97,16 @@ agent:
   #   You are Min Code Agent, ...
 
 # ---------------------------------------------------------------------------
-# data：运行时数据（trace / session / experiment）存放位置
+# data：运行时数据（traces / sessions / experiments）存放位置
 # ---------------------------------------------------------------------------
+# 三类数据统一由 data.location 决定，无单独的 trace.dir 等覆盖项。
 data:
   # global   — {user_home}/.mincode/projects/{project-id}/
+  #            {traces,sessions,experiments} 都在该 project 目录下
   #            project-id = {目录名 slug}-{SHA256(规范化绝对路径) 前8位}
-  #            例：min-code-agent-3f2a91c2
-  #            可避免 D:\A-B\C 与 D:\A\B-C 这类路径碰撞
-  # workspace — {workspace}/.mincode/  （旧布局）
+  # workspace — {workspace}/.mincode/{traces,sessions,experiments}
   # ENV: MINCODE_DATA_LOCATION
   # 默认: global
-  # global 模式下仍会**读取**旧的 {workspace}/.mincode/traces|experiments（兼容）
   location: global
 
   # 全局数据根目录（仅 location=global 时使用）。
@@ -125,21 +124,13 @@ memory:
   auto_extract: false
 
 # ---------------------------------------------------------------------------
-# trace：结构化事件 JSONL 落盘（可观测）
-# ---------------------------------------------------------------------------
-trace:
-  # 仅当该值为**绝对路径**时作为 traces 目录覆盖 data 布局。
-  # 相对路径在 global 模式下会被忽略（数据写入 data 项目目录）。
-  # ENV: MINCODE_TRACE_DIR
-  dir: .mincode/traces
-
-# ---------------------------------------------------------------------------
 # 本文件未覆盖、但运行时会用到的路径（非 YAML 配置，仅说明）
 # ---------------------------------------------------------------------------
 # <workspace>/AGENTS.md          层级项目指令（Phase 8）
 # <workspace>/skills/<name>/SKILL.md  技能（Phase 9，/skill 手工激活）
 # <workspace>/MEMORY.md          跨会话事实（Phase 11）
-# <workspace>/.mincode/sessions/ 会话 JSON
-# <workspace>/.mincode/experiments/<name>/ 实验结果（experiment run）
+# 数据目录（由 data.location 决定）:
+#   global    {home}/.mincode/projects/<project-id>/{traces,sessions,experiments}
+#   workspace {workspace}/.mincode/{traces,sessions,experiments}
 # Web UI: mincode web  — 静态资源 embed 自 web/dist（需先 npm run build）
-# Global data: {home}/.mincode/projects/<project-id>/{traces,sessions,experiments}
+

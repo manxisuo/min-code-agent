@@ -14,23 +14,19 @@ import (
 // LocationGlobal stores data under the user home data root.
 const LocationGlobal = "global"
 
-// LocationWorkspace stores data under <workspace>/.mincode (legacy).
+// LocationWorkspace stores data under <workspace>/.mincode.
 const LocationWorkspace = "workspace"
 
 // Layout is the resolved data directories for one workspace.
+// Only these paths are used — no legacy workspace/.mincode fallback.
 type Layout struct {
 	Location    string
-	DataRoot    string // user data root (global) or workspace/.mincode
+	DataRoot    string
 	ProjectID   string
 	ProjectDir  string
 	TracesDir   string
 	SessionsDir string
 	Experiments string
-
-	// Legacy locations (always under <workspace>/.mincode) for read compatibility.
-	LegacyTraces      string
-	LegacySessions    string
-	LegacyExperiments string
 }
 
 // UserHomeDataRoot returns {home}/.mincode.
@@ -49,7 +45,6 @@ func NormalizeForID(p string) string {
 	}
 	p = filepath.Clean(p)
 	p = filepath.ToSlash(p)
-	// Strip trailing slash except root-like "C:/"
 	p = strings.TrimRight(p, "/")
 	if runtime.GOOS == "windows" {
 		p = strings.ToLower(p)
@@ -110,7 +105,6 @@ func Resolve(workspace, location, dataRoot string) Layout {
 	if err == nil {
 		workspace = absWS
 	}
-	legacyRoot := filepath.Join(workspace, ".mincode")
 	loc := location
 	if loc == "" {
 		loc = LocationGlobal
@@ -120,35 +114,25 @@ func Resolve(workspace, location, dataRoot string) Layout {
 	}
 
 	l := Layout{
-		Location:          loc,
-		ProjectID:         ProjectID(workspace),
-		LegacyTraces:      filepath.Join(legacyRoot, "traces"),
-		LegacySessions:    filepath.Join(legacyRoot, "sessions"),
-		LegacyExperiments: filepath.Join(legacyRoot, "experiments"),
+		Location:  loc,
+		ProjectID: ProjectID(workspace),
 	}
 
 	switch loc {
 	case LocationWorkspace:
-		l.DataRoot = legacyRoot
-		l.ProjectDir = legacyRoot
-		l.TracesDir = filepath.Join(legacyRoot, "traces")
-		l.SessionsDir = filepath.Join(legacyRoot, "sessions")
-		l.Experiments = filepath.Join(legacyRoot, "experiments")
-		// Legacy == primary
-		l.LegacyTraces = l.TracesDir
-		l.LegacySessions = l.SessionsDir
-		l.LegacyExperiments = l.Experiments
+		l.DataRoot = filepath.Join(workspace, ".mincode")
+		l.ProjectDir = l.DataRoot
 	default: // global
 		l.DataRoot = dataRoot
 		l.ProjectDir = filepath.Join(dataRoot, "projects", l.ProjectID)
-		l.TracesDir = filepath.Join(l.ProjectDir, "traces")
-		l.SessionsDir = filepath.Join(l.ProjectDir, "sessions")
-		l.Experiments = filepath.Join(l.ProjectDir, "experiments")
 	}
+	l.TracesDir = filepath.Join(l.ProjectDir, "traces")
+	l.SessionsDir = filepath.Join(l.ProjectDir, "sessions")
+	l.Experiments = filepath.Join(l.ProjectDir, "experiments")
 	return l
 }
 
-// EnsureDirs creates primary data directories.
+// EnsureDirs creates data directories.
 func (l Layout) EnsureDirs() error {
 	for _, d := range []string{l.TracesDir, l.SessionsDir, l.Experiments} {
 		if d == "" {
@@ -159,47 +143,4 @@ func (l Layout) EnsureDirs() error {
 		}
 	}
 	return nil
-}
-
-// TraceSearchDirs returns directories to search when listing/reading traces
-// (primary first, then legacy when different).
-func (l Layout) TraceSearchDirs() []string {
-	out := []string{l.TracesDir}
-	if l.LegacyTraces != "" && !samePath(l.LegacyTraces, l.TracesDir) {
-		out = append(out, l.LegacyTraces)
-	}
-	return out
-}
-
-// ExperimentSearchDirs returns experiment roots (primary, then legacy).
-func (l Layout) ExperimentSearchDirs() []string {
-	out := []string{l.Experiments}
-	if l.LegacyExperiments != "" && !samePath(l.LegacyExperiments, l.Experiments) {
-		out = append(out, l.LegacyExperiments)
-	}
-	return out
-}
-
-// SessionSearchDirs returns session store directories.
-func (l Layout) SessionSearchDirs() []string {
-	out := []string{l.SessionsDir}
-	if l.LegacySessions != "" && !samePath(l.LegacySessions, l.SessionsDir) {
-		out = append(out, l.LegacySessions)
-	}
-	return out
-}
-
-func samePath(a, b string) bool {
-	if a == b {
-		return true
-	}
-	aa, err1 := filepath.Abs(a)
-	bb, err2 := filepath.Abs(b)
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(filepath.Clean(aa), filepath.Clean(bb))
-	}
-	return filepath.Clean(aa) == filepath.Clean(bb)
 }

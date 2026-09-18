@@ -166,7 +166,7 @@ Sessions / traces / experiments 默认写在：
   project-id = {目录名}-{SHA256(绝对路径)前8位}
 ```
 
-可用 `data.location: workspace` 改回项目内 `.mincode/`；旧目录仍可读。详见 `mincode.example.yaml`。
+`data.location: workspace` 可改到项目内 `.mincode/`。**只使用当前布局**，不合并读取另一种目录。详见 `mincode.example.yaml`。
 
 实验对比：
 
