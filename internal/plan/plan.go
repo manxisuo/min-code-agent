@@ -245,8 +245,10 @@ func statusMark(st Status) string {
 
 func dimNote(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > 80 {
-		s = s[:80] + "…"
+	// Truncate on rune boundaries so CJK text is not split mid-character.
+	r := []rune(s)
+	if len(r) > 80 {
+		s = string(r[:80]) + "…"
 	}
 	return s
 }

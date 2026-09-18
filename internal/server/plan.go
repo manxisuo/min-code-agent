@@ -13,6 +13,7 @@ import (
 	"github.com/manxisuo/mincode/internal/llm"
 	"github.com/manxisuo/mincode/internal/observability"
 	"github.com/manxisuo/mincode/internal/plan"
+	"github.com/manxisuo/mincode/internal/strutil"
 )
 
 type planResponse struct {
@@ -251,9 +252,7 @@ func (s *Server) runPlanSteps(ctx context.Context, p *plan.Plan) error {
 		if summary == "" {
 			summary = "ok"
 		}
-		if len(summary) > 200 {
-			summary = summary[:200] + "…"
-		}
+		summary = strutil.TruncateRunes(summary, 120)
 		_ = p.CompleteStep(step.Index, summary)
 		stepNotes = append(stepNotes, fmt.Sprintf("- Step %d (%s): %s", step.Index, step.Title, summary))
 		done, total := p.Progress()

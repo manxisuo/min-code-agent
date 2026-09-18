@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/strutil"
 )
 
 // Player steps through a trace file interactively or programmatically.
@@ -144,8 +145,5 @@ func (p *Player) PrintCurrent(w io.Writer) {
 func formatData(v any) string {
 	s := fmt.Sprintf("%v", v)
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > 200 {
-		s = s[:200] + "..."
-	}
-	return s
+	return strutil.TruncateRunes(s, 100)
 }

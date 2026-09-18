@@ -9,6 +9,7 @@ import (
 
 	"github.com/manxisuo/mincode/internal/ctxmgr"
 	"github.com/manxisuo/mincode/internal/llm"
+	"github.com/manxisuo/mincode/internal/strutil"
 )
 
 const exportToolResultMax = 2000
@@ -119,10 +120,7 @@ func grayCode(s string) string {
 func compactExportJSON(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > 160 {
-		s = s[:160] + "…"
-	}
-	return s
+	return strutil.TruncateRunes(s, 80)
 }
 
 // defaultExportPath is workspace/exports/<session-id>.md
