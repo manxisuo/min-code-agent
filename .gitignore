@@ -6,7 +6,7 @@
 .mincode/
 exports/
 
-# Local provider secrets / machine-specific config (copy from mincode.yaml.example)
+# Local provider secrets / machine-specific config (copy from mincode.example.yaml)
 mincode.yaml
 mincode.yml
 
