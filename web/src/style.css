@@ -403,6 +403,7 @@ button.linkish:hover:not(:disabled) {
 .tl-item .ty { margin-right: 8px; }
 .tl-item.tool .ty { color: var(--accent); }
 .tl-item.llm .ty { color: #d2a8ff; }
+.tl-item.stream .ty { color: #7ee787; }
 .tl-item.batch .ty { color: var(--warn); }
 .tl-item.err .ty { color: var(--err); }
 .tl-item .d { color: var(--muted); word-break: break-all; }

@@ -18,6 +18,12 @@ type Metrics struct {
 	ParallelBatches int
 	// ParallelToolCalls counts tool.* events flagged parallel.
 	ParallelToolCalls int
+	// StreamCalls counts llm.request_finished with streamed=true.
+	StreamCalls int
+	// StreamDeltas counts llm.stream_delta events.
+	StreamDeltas int
+	// LastTTFTMS is the most recent time-to-first-token in milliseconds.
+	LastTTFTMS int64
 }
 
 // MetricsCollector folds events into Metrics. Safe for sequential bus delivery.
@@ -40,7 +46,15 @@ func (c *MetricsCollector) Handle(e Event) {
 			c.m.OutputTokens += data.OutputTokens
 			c.m.TotalTokens += data.TotalTokens
 			c.m.LLMDuration += time.Duration(data.DurationMS) * time.Millisecond
+			if data.Streamed {
+				c.m.StreamCalls++
+				if data.TTFTMS > 0 {
+					c.m.LastTTFTMS = data.TTFTMS
+				}
+			}
 		}
+	case EventLLMStreamDelta:
+		c.m.StreamDeltas++
 	case EventLLMRequestFailed:
 		c.m.Errors++
 		if data, ok := asLLMData(e.Data); ok {
@@ -74,6 +88,11 @@ func (m Metrics) Format() string {
 	fmt.Fprintf(&b, "LLM Time         %s\n", m.LLMDuration.Round(time.Millisecond))
 	fmt.Fprintf(&b, "Parallel Batches %d\n", m.ParallelBatches)
 	fmt.Fprintf(&b, "Parallel Tools   %d\n", m.ParallelToolCalls)
+	fmt.Fprintf(&b, "Stream Calls     %d\n", m.StreamCalls)
+	fmt.Fprintf(&b, "Stream Deltas    %d\n", m.StreamDeltas)
+	if m.LastTTFTMS > 0 {
+		fmt.Fprintf(&b, "Last TTFT        %dms\n", m.LastTTFTMS)
+	}
 	return b.String()
 }
 
@@ -115,6 +134,10 @@ func asLLMData(v any) (LLMRequestData, bool) {
 		out.OutputTokens = intFromAny(d["output_tokens"])
 		out.TotalTokens = intFromAny(d["total_tokens"])
 		out.DurationMS = int64(intFromAny(d["duration_ms"]))
+		if b, ok := d["streamed"].(bool); ok {
+			out.Streamed = b
+		}
+		out.TTFTMS = int64(intFromAny(d["ttft_ms"]))
 		return out, true
 	}
 	return LLMRequestData{}, false

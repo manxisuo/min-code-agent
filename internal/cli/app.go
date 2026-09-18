@@ -61,6 +61,9 @@ type App struct {
 	lastResult *agent.Result
 	out        io.Writer
 	echoTools  atomic.Bool
+	// streamEcho prints LLM stream deltas to out while a turn runs.
+	streamEcho   atomic.Bool
+	streamedText strings.Builder
 }
 
 // NewApp constructs the application from options.
@@ -141,6 +144,7 @@ func NewApp(opts Options) (*App, error) {
 		ag.ParallelTools = *cfg.Agent.ParallelTools
 	}
 	ag.MaxParallel = cfg.Agent.MaxParallel
+	ag.Stream = cfg.StreamEnabled()
 
 	instrLoader, err := instruction.NewLoader(workspace)
 	if err != nil {
@@ -198,6 +202,15 @@ func NewApp(opts Options) (*App, error) {
 
 	ag.Approver = NewStdinApprover(app.out, ws)
 	bus.Subscribe(func(e observability.Event) {
+		if e.Type == observability.EventLLMStreamDelta {
+			if data, ok := e.Data.(observability.StreamDeltaData); ok && data.Text != "" {
+				app.streamedText.WriteString(data.Text)
+				if app.streamEcho.Load() {
+					fmt.Fprint(app.out, data.Text)
+				}
+			}
+			return
+		}
 		if !app.echoTools.Load() {
 			return
 		}
@@ -469,14 +482,19 @@ func countUserTurns(entries []session.Entry) int {
 
 func (a *App) singleShot(ctx context.Context, prompt string) error {
 	a.emit(observability.EventAgentStarted, observability.AgentLifecycleData{Reason: "single-shot"})
+	a.streamedText.Reset()
+	a.streamEcho.Store(true)
 	res, err := a.agent.Run(ctx, prompt)
+	a.streamEcho.Store(false)
 	a.lastResult = res
 	a.saveSession()
 	if err != nil {
 		a.emit(observability.EventAgentFailed, observability.AgentLifecycleData{Reason: err.Error()})
 		return err
 	}
-	if res.Final != "" {
+	if a.streamedText.Len() > 0 {
+		fmt.Fprintln(a.out)
+	} else if res.Final != "" {
 		fmt.Fprintln(a.out, res.Final)
 	}
 	a.emit(observability.EventAgentFinished, observability.AgentLifecycleData{
@@ -594,13 +612,25 @@ func (a *App) reportTurnError(err error) {
 // runTurn executes one user turn through the agent and prints tool + final output.
 func (a *App) runTurn(ctx context.Context, userText string) error {
 	a.echoTools.Store(true)
-	defer a.echoTools.Store(false)
+	a.streamedText.Reset()
+	a.streamEcho.Store(true)
+	defer func() {
+		a.echoTools.Store(false)
+		a.streamEcho.Store(false)
+	}()
 
 	res, err := a.agent.Run(ctx, userText)
 	if err != nil {
 		return err
 	}
-	if res.Final != "" {
+	if a.streamedText.Len() > 0 {
+		// Deltas already printed; just close the line.
+		fmt.Fprintln(a.out)
+		if res.Final != "" && !strings.HasSuffix(strings.TrimRight(a.streamedText.String(), "\n"), strings.TrimSpace(res.Final)) {
+			fmt.Fprintln(a.out, res.Final)
+			fmt.Fprintln(a.out)
+		}
+	} else if res.Final != "" {
 		fmt.Fprintln(a.out)
 		fmt.Fprintln(a.out, res.Final)
 		fmt.Fprintln(a.out)
@@ -1557,6 +1587,8 @@ func timelineLine(e observability.Event) (string, bool) {
 		return fmt.Sprintf("%s  %s %v→%v tokens  compressed=%v preserved=%v",
 			ts, yellow("Compacted"), data["before_tokens"], data["after_tokens"],
 			data["compressed"], data["preserved"]), true
+	case observability.EventLLMStreamDelta:
+		// Printed live via the bus subscriber when streamEcho is on.
 	case observability.EventLLMRequestFinished:
 		data := mapFromAny(e.Data)
 		preview, _ := data["content_preview"].(string)
@@ -1564,11 +1596,19 @@ func timelineLine(e observability.Event) (string, bool) {
 		preview = strings.ReplaceAll(preview, "\r\n", "\n")
 		preview = strings.ReplaceAll(preview, "\n", " ↵ ")
 		preview = truncateStr(preview, 72)
-		head := fmt.Sprintf("%s  %s %s %s %s",
+		streamTag := ""
+		if b, ok := data["streamed"].(bool); ok && b {
+			ttft := data["ttft_ms"]
+			if ttft == nil {
+				ttft = 0
+			}
+			streamTag = gray(fmt.Sprintf(" stream ttft=%vms", ttft))
+		}
+		head := fmt.Sprintf("%s  %s %s %s %s%s",
 			ts, magenta("LLM Response"),
 			gray(fmt.Sprintf("in=%v out=%v", data["input_tokens"], data["output_tokens"])),
 			gray(fmt.Sprintf("%vms", data["duration_ms"])),
-			dim("…"))
+			dim("…"), streamTag)
 		if preview == "" {
 			return head, true
 		}

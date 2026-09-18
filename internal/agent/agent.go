@@ -58,6 +58,11 @@ type Agent struct {
 	// MaxParallel caps concurrent read-only tools (default 4).
 	MaxParallel int
 
+	// Stream enables streaming LLM output when the provider supports it.
+	Stream bool
+	// lastTTFT is TTFT of the most recent streamed chat call.
+	lastTTFT time.Duration
+
 	// Ctx builds budgeted prompts and keeps conversation state.
 	Ctx   *ctxmgr.Manager
 	State State
@@ -87,6 +92,7 @@ func NewWithCompress(provider llm.Provider, reg *tools.Registry, bus *observabil
 		Policy:        &permission.ShellAwarePolicy{Inner: permission.NewDefaultPolicy()},
 		ParallelTools: true,
 		MaxParallel:   defaultMaxParallel,
+		Stream:        true,
 		Ctx:           mgr,
 		State:         StateIdle,
 	}
@@ -183,10 +189,8 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 		})
 
 		a.setState(StateCallingLLM)
-		start := time.Now()
 		a.emitLLMStarted(req)
-		resp, err := a.Provider.Chat(ctx, req)
-		elapsed := time.Since(start)
+		resp, elapsed, streamed, err := a.chatWithProvider(ctx, req)
 		if err != nil {
 			a.emitLLMFailed(elapsed, err)
 			a.Ctx.MarkRequestFailed()
@@ -198,7 +202,7 @@ func (a *Agent) Run(ctx context.Context, userInput string) (*Result, error) {
 			a.Ctx.DropLastUser()
 			return nil, err
 		}
-		a.emitLLMFinished(req, resp, elapsed)
+		a.emitLLMFinished(req, resp, elapsed, streamed)
 
 		// Calibrate local token estimates against provider-reported prompt_tokens.
 		if resp.Usage.PromptTokens > 0 {
@@ -477,7 +481,69 @@ func (a *Agent) emitLLMStarted(req llm.ChatRequest) {
 	})
 }
 
-func (a *Agent) emitLLMFinished(req llm.ChatRequest, resp *llm.ChatResponse, elapsed time.Duration) {
+// chatWithProvider uses StreamingProvider when Stream is on; otherwise Chat.
+// Returns full aggregated response even when deltas were delivered.
+func (a *Agent) chatWithProvider(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, time.Duration, bool, error) {
+	if !a.Stream {
+		start := time.Now()
+		resp, err := a.Provider.Chat(ctx, req)
+		return resp, time.Since(start), false, err
+	}
+	sp, ok := llm.IsStreamingProvider(a.Provider)
+	if !ok {
+		start := time.Now()
+		resp, err := a.Provider.Chat(ctx, req)
+		return resp, time.Since(start), false, err
+	}
+
+	start := time.Now()
+	var (
+		ttft   time.Duration
+		deltas int
+		length int
+	)
+	a.emit(observability.EventLLMStreamStarted, observability.LLMRequestData{
+		Provider:     a.Provider.Name(),
+		Model:        a.Provider.Model(),
+		MessageCount: len(req.Messages),
+		Streamed:     true,
+	})
+	resp, err := sp.ChatStream(ctx, req, func(text string) {
+		if text == "" {
+			return
+		}
+		if deltas == 0 {
+			ttft = time.Since(start)
+		}
+		deltas++
+		length += len(text)
+		a.emit(observability.EventLLMStreamDelta, observability.StreamDeltaData{
+			Text:     text,
+			Index:    deltas,
+			TTFTMS:   ttft.Milliseconds(),
+			TotalLen: length,
+		})
+	})
+	elapsed := time.Since(start)
+	if err != nil {
+		return nil, elapsed, true, err
+	}
+	a.lastTTFT = ttft
+	a.emit(observability.EventLLMStreamFinished, observability.LLMRequestData{
+		Provider:       a.Provider.Name(),
+		Model:          a.Provider.Model(),
+		MessageCount:   len(req.Messages),
+		Streamed:       true,
+		DurationMS:     elapsed.Milliseconds(),
+		TTFTMS:         ttft.Milliseconds(),
+		Deltas:         deltas,
+		OutputTokens:   resp.Usage.CompletionTokens,
+		ContentPreview: truncatePreview(resp.Content, toolPreviewLen),
+	})
+	return resp, elapsed, true, nil
+}
+
+func (a *Agent) emitLLMFinished(req llm.ChatRequest, resp *llm.ChatResponse, elapsed time.Duration, streamed bool) {
 	preview := resp.Content
 	if len(preview) > toolPreviewLen {
 		preview = truncatePreview(preview, toolPreviewLen)
@@ -494,6 +560,8 @@ func (a *Agent) emitLLMFinished(req llm.ChatRequest, resp *llm.ChatResponse, ela
 		TotalTokens:    resp.Usage.TotalTokens,
 		DurationMS:     elapsed.Milliseconds(),
 		ContentPreview: preview,
+		Streamed:       streamed,
+		TTFTMS:         a.lastTTFT.Milliseconds(),
 	})
 }
 

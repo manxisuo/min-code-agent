@@ -16,6 +16,10 @@ type FakeProvider struct {
 	Err error
 	// OnChat is an optional hook invoked with each request.
 	OnChat func(req ChatRequest)
+	// StreamChunkSize splits content when ChatStream is used (default 8 runes).
+	StreamChunkSize int
+	// OnStreamDelta is an optional hook for every streamed fragment.
+	OnStreamDelta func(text string)
 
 	model string
 	calls int
@@ -100,6 +104,38 @@ func (f *FakeProvider) Chat(ctx context.Context, req ChatRequest) (*ChatResponse
 	out := resp
 	out.Raw = json.RawMessage(fmt.Sprintf(`{"fake":true,"call":%d}`, f.calls))
 	return &out, nil
+}
+
+// ChatStream implements StreamingProvider by replaying scripted content in chunks.
+func (f *FakeProvider) ChatStream(ctx context.Context, req ChatRequest, onDelta func(text string)) (*ChatResponse, error) {
+	if onDelta == nil {
+		return f.Chat(ctx, req)
+	}
+	resp, err := f.Chat(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	size := f.StreamChunkSize
+	if size <= 0 {
+		size = 8
+	}
+	runes := []rune(resp.Content)
+	hook := f.OnStreamDelta
+	for i := 0; i < len(runes); i += size {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		end := i + size
+		if end > len(runes) {
+			end = len(runes)
+		}
+		piece := string(runes[i:end])
+		onDelta(piece)
+		if hook != nil {
+			hook(piece)
+		}
+	}
+	return resp, nil
 }
 
 // estimateTokens is a rough 4-chars-per-token heuristic for the fake provider.

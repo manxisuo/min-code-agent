@@ -72,11 +72,13 @@ type wireTool struct {
 }
 
 type wireRequest struct {
-	Model       string        `json:"model"`
-	Messages    []wireMessage `json:"messages"`
-	Temperature *float64      `json:"temperature,omitempty"`
-	MaxTokens   *int          `json:"max_tokens,omitempty"`
-	Tools       []wireTool    `json:"tools,omitempty"`
+	Model         string             `json:"model"`
+	Messages      []wireMessage      `json:"messages"`
+	Temperature   *float64           `json:"temperature,omitempty"`
+	MaxTokens     *int               `json:"max_tokens,omitempty"`
+	Tools         []wireTool         `json:"tools,omitempty"`
+	Stream        bool               `json:"stream,omitempty"`
+	StreamOptions *wireStreamOptions `json:"stream_options,omitempty"`
 }
 
 type wireResponse struct {

@@ -98,6 +98,10 @@ func normalize(cfg *Config) {
 	if cfg.Provider.TimeoutSec <= 0 {
 		cfg.Provider.TimeoutSec = 120
 	}
+	if cfg.Provider.Stream == nil {
+		on := true
+		cfg.Provider.Stream = &on
+	}
 	if cfg.Agent.MaxSteps <= 0 {
 		cfg.Agent.MaxSteps = 30
 	}

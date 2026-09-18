@@ -9,6 +9,7 @@ function msgId(): string {
 function eventClass(type: string): string {
   if (type.startsWith("tool.batch")) return "batch";
   if (type.startsWith("tool.")) return "tool";
+  if (type.startsWith("llm.stream")) return "stream";
   if (type.startsWith("llm.")) return "llm";
   if (type.includes("failed") || type.includes("denied") || type.includes("loop")) return "err";
   return "";
@@ -17,6 +18,7 @@ function eventClass(type: string): string {
 function shortType(type: string): string {
   return type
     .replace(/^tool\./, "T.")
+    .replace(/^llm\.stream_/, "L.stream.")
     .replace(/^llm\./, "L.")
     .replace(/^context\./, "C.")
     .replace(/^agent\./, "A.")
@@ -37,6 +39,9 @@ function compact(v: unknown): string {
 
 function previewData(data?: Record<string, unknown>): string {
   if (!data) return "";
+  if (data.text != null && data.total_len != null) {
+    return String(data.text).slice(0, 40);
+  }
   if (data.tool) {
     const args = data.arguments ? " " + compact(data.arguments) : "";
     return String(data.tool) + args;
@@ -73,6 +78,9 @@ export function useInspector() {
   let es: EventSource | null = null;
   let pollTimer: number | null = null;
   let refreshTimer: number | null = null;
+  let streamMsgId: string | null = null;
+  let streamFlush: number | null = null;
+  let streamPending = "";
 
   function addMessage(role: ChatMessage["role"], text: string) {
     messages.value.push({ id: msgId(), role, text });
@@ -95,10 +103,40 @@ export function useInspector() {
 
   function appendAssistantOnce(final: string) {
     if (!final) return;
-    const exists = messages.value.some(
-      (m) => m.role === "assistant" && m.text.includes(final.slice(0, 40)),
-    );
-    if (!exists) addMessage("assistant", final);
+    const last = [...messages.value].reverse().find((m) => m.role === "assistant");
+    if (last) {
+      const lastText = last.text.trim();
+      const fin = final.trim();
+      if (lastText === fin) return;
+      if (fin.startsWith(lastText.slice(0, Math.min(40, lastText.length))) && fin.length >= lastText.length) {
+        last.text = fin;
+        return;
+      }
+      if (lastText.includes(fin.slice(0, Math.min(40, fin.length)))) return;
+    }
+    addMessage("assistant", final);
+  }
+
+  function flushStreamDelta() {
+    if (!streamPending) return;
+    const piece = streamPending;
+    streamPending = "";
+    if (!streamMsgId) {
+      const id = msgId();
+      streamMsgId = id;
+      messages.value.push({ id, role: "assistant", text: piece });
+    } else {
+      const m = messages.value.find((x) => x.id === streamMsgId);
+      if (m) m.text += piece;
+    }
+  }
+
+  function scheduleStreamFlush() {
+    if (streamFlush != null) return;
+    streamFlush = window.setTimeout(() => {
+      streamFlush = null;
+      flushStreamDelta();
+    }, 40);
   }
 
   function applySession(s: SessionInfo) {
@@ -113,13 +151,29 @@ export function useInspector() {
     events.value.push(evt);
     if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
 
+    if (evt.type === "llm.stream_delta") {
+      const t = evt.data?.text;
+      if (typeof t === "string" && t) {
+        streamPending += t;
+        scheduleStreamFlush();
+      }
+    }
+    if (evt.type === "llm.request_finished" || evt.type === "llm.request_failed") {
+      flushStreamDelta();
+      streamMsgId = null;
+    }
+
     if (evt.type === "agent.state_changed") {
       const to = String(evt.data?.to || "");
       if (to === "CANCELLED") {
+        flushStreamDelta();
         addSystemOnce("cancelled");
         clearPollTimer();
       }
-      if (to === "FINISHED" || to === "FAILED") clearPollTimer();
+      if (to === "FINISHED" || to === "FAILED") {
+        flushStreamDelta();
+        clearPollTimer();
+      }
     }
     if (evt.type === "llm.request_finished" || evt.type === "context.built") {
       void refreshSession();
@@ -219,6 +273,7 @@ export function useInspector() {
     es?.close();
     clearPollTimer();
     if (refreshTimer != null) window.clearInterval(refreshTimer);
+    if (streamFlush != null) window.clearTimeout(streamFlush);
   });
 
   return {

@@ -112,6 +112,7 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		ag.ParallelTools = *cfg.Agent.ParallelTools
 	}
 	ag.MaxParallel = cfg.Agent.MaxParallel
+	ag.Stream = cfg.StreamEnabled()
 	ag.Approver = localWebApprover{}
 
 	registry.Register(&tools.MemoryAdd{

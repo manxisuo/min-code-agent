@@ -18,6 +18,8 @@ type ProviderConfig struct {
 	Temperature float64 `yaml:"temperature"`
 	MaxTokens   int     `yaml:"max_tokens"`
 	TimeoutSec  int     `yaml:"timeout_sec"`
+	// Stream enables OpenAI-compatible SSE streaming (default true).
+	Stream *bool `yaml:"stream"`
 }
 
 // AgentConfig holds basic agent-loop limits.
@@ -57,6 +59,7 @@ func Default() Config {
 			Model:       "gpt-4o-mini",
 			Temperature: 0.7,
 			TimeoutSec:  120,
+			Stream:      &on,
 		},
 		Agent: AgentConfig{
 			MaxSteps:      30,
@@ -91,6 +94,14 @@ Write operations will ask the user for permission — propose clear, reviewable 
 Prefer dedicated tools (read_file, list_dir, glob, grep) over shell for inspecting files.
 When you have enough information, reply with a final answer and no tool calls.
 `
+
+// StreamEnabled reports whether provider streaming should be used.
+func (c Config) StreamEnabled() bool {
+	if c.Provider.Stream == nil {
+		return true
+	}
+	return *c.Provider.Stream
+}
 
 // PlatformShellHint returns OS-specific shell guidance for the system prompt.
 func PlatformShellHint(goos string) string {

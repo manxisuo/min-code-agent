@@ -25,6 +25,10 @@ const (
 	EventLLMRequestFinished EventType = "llm.request_finished"
 	EventLLMRequestFailed   EventType = "llm.request_failed"
 
+	EventLLMStreamStarted  EventType = "llm.stream_started"
+	EventLLMStreamDelta    EventType = "llm.stream_delta"
+	EventLLMStreamFinished EventType = "llm.stream_finished"
+
 	EventAgentStateChanged EventType = "agent.state_changed"
 
 	EventToolRequested EventType = "tool.requested"
@@ -103,6 +107,19 @@ type LLMRequestData struct {
 	OutputTokens   int    `json:"output_tokens,omitempty"`
 	TotalTokens    int    `json:"total_tokens,omitempty"`
 	Error          string `json:"error,omitempty"`
+	// Streaming fields.
+	Streamed bool   `json:"streamed,omitempty"`
+	TTFTMS   int64  `json:"ttft_ms,omitempty"`
+	Deltas   int    `json:"deltas,omitempty"`
+	Partial  string `json:"partial,omitempty"`
+}
+
+// StreamDeltaData is payload for llm.stream_delta.
+type StreamDeltaData struct {
+	Text     string `json:"text,omitempty"`
+	Index    int    `json:"index"`
+	TTFTMS   int64  `json:"ttft_ms,omitempty"`
+	TotalLen int    `json:"total_len,omitempty"`
 }
 
 // AgentLifecycleData is payload for agent.* events.
