@@ -15,6 +15,8 @@ export interface ContextItem {
   excluded?: boolean;
   truncated?: boolean;
   pinned?: boolean;
+  reason?: string;
+  tool_call_id?: string;
 }
 
 export interface ContextSnapshot {
