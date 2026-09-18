@@ -62,4 +62,6 @@ export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";
   text: string;
+  /** Local time when the bubble was first shown (ISO string). */
+  ts?: string;
 }

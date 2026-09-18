@@ -92,8 +92,16 @@ export function useInspector() {
   /** Text of the last assistant bubble written for final/stream sync. */
   let lastAssistantText = "";
 
+  function nowISO(): string {
+    return new Date().toISOString();
+  }
+
+  function fmtClock(iso?: string): string {
+    return fmtTime(iso);
+  }
+
   function addMessage(role: ChatMessage["role"], text: string) {
-    messages.value.push({ id: msgId(), role, text });
+    messages.value.push({ id: msgId(), role, text, ts: nowISO() });
     if (role === "assistant") lastAssistantText = text;
   }
 
@@ -154,7 +162,7 @@ export function useInspector() {
     if (!streamMsgId) {
       const id = msgId();
       streamMsgId = id;
-      messages.value.push({ id, role: "assistant", text: piece });
+      messages.value.push({ id, role: "assistant", text: piece, ts: nowISO() });
       lastAssistantText = piece;
     } else {
       const m = messages.value.find((x) => x.id === streamMsgId);
@@ -358,5 +366,6 @@ export function useInspector() {
     shortType,
     previewData,
     fmtTime,
+    fmtClock,
   };
 }

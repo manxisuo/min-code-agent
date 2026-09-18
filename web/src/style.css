@@ -186,12 +186,24 @@ button.primary {
 .msg.user { align-self: flex-end; background: var(--user); }
 .msg.assistant { align-self: flex-start; background: var(--panel-2); border: 1px solid var(--line); }
 .msg.system { align-self: center; color: var(--muted); font-size: 12px; background: transparent; }
+.msg-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
 .msg .role {
   font-size: 11px;
   color: var(--muted);
-  margin-bottom: 4px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+.msg .ts {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--muted);
+  opacity: 0.85;
 }
 
 .msg .plain-text { white-space: pre-wrap; word-break: break-word; }

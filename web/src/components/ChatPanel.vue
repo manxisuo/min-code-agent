@@ -16,6 +16,13 @@ const emit = defineEmits<{
 function onSubmit() {
   if (!props.disabled) emit("send");
 }
+
+function clock(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour12: false });
+}
 </script>
 
 <template>
@@ -26,7 +33,10 @@ function onSubmit() {
     </div>
     <div class="messages" aria-live="polite">
       <div v-for="m in messages" :key="m.id" class="msg" :class="m.role">
-        <div class="role">{{ m.role }}</div>
+        <div class="msg-head">
+          <span class="role">{{ m.role }}</span>
+          <span v-if="m.ts" class="ts">{{ clock(m.ts) }}</span>
+        </div>
         <MdText :content="m.text" :plain="m.role === 'system'" />
       </div>
     </div>
