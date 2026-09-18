@@ -174,6 +174,7 @@ func (s *Server) handlePlanApprove(w http.ResponseWriter, _ *http.Request) {
 	go func() {
 		defer cancel()
 		err := s.runPlanSteps(ctx, p)
+		s.saveCurrentSession()
 		s.mu.Lock()
 		s.running = false
 		s.cancelTurn = nil

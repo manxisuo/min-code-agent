@@ -7,6 +7,7 @@ import InstructionsPanel from "./components/InstructionsPanel.vue";
 import MemoryPanel from "./components/MemoryPanel.vue";
 import PlanPanel from "./components/PlanPanel.vue";
 import PermissionBar from "./components/PermissionBar.vue";
+import SessionsPanel from "./components/SessionsPanel.vue";
 import SkillsPanel from "./components/SkillsPanel.vue";
 import { useInspector } from "./composables/useInspector";
 import { useTheme } from "./theme";
@@ -22,6 +23,7 @@ const {
   input,
   send,
   cancel,
+  loadSession,
   eventClass,
   shortType,
   previewData,
@@ -29,7 +31,13 @@ const {
 } = useInspector();
 
 const view = ref<
-  "inspector" | "plan" | "skills" | "instructions" | "memory" | "experiments"
+  | "inspector"
+  | "plan"
+  | "skills"
+  | "instructions"
+  | "memory"
+  | "sessions"
+  | "experiments"
 >("inspector");
 
 const stateLabel = computed(() => session.value?.state || "IDLE");
@@ -47,6 +55,11 @@ function onInput(v: string) {
 
 function onSend() {
   void send();
+}
+
+async function onSwitchSession(id: string) {
+  await loadSession(id);
+  view.value = "inspector";
 }
 </script>
 
@@ -100,6 +113,13 @@ function onSend() {
           </button>
           <button
             type="button"
+            :class="{ active: view === 'sessions' }"
+            @click="view = 'sessions'"
+          >
+            Sessions
+          </button>
+          <button
+            type="button"
             :class="{ active: view === 'experiments' }"
             @click="view = 'experiments'"
           >
@@ -122,7 +142,8 @@ function onSend() {
           view === 'plan' ||
           view === 'skills' ||
           view === 'instructions' ||
-          view === 'memory',
+          view === 'memory' ||
+          view === 'sessions',
       }"
     >
       <template v-if="view === 'inspector'">
@@ -147,6 +168,10 @@ function onSend() {
       <SkillsPanel v-else-if="view === 'skills'" />
       <InstructionsPanel v-else-if="view === 'instructions'" />
       <MemoryPanel v-else-if="view === 'memory'" />
+      <SessionsPanel
+        v-else-if="view === 'sessions'"
+        :load-session="onSwitchSession"
+      />
       <ExperimentPanel v-else />
     </main>
   </div>

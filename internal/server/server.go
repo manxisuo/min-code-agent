@@ -17,6 +17,7 @@ import (
 	"github.com/manxisuo/mincode/internal/memory"
 	"github.com/manxisuo/mincode/internal/observability"
 	"github.com/manxisuo/mincode/internal/plan"
+	"github.com/manxisuo/mincode/internal/session"
 	"github.com/manxisuo/mincode/internal/skill"
 	"github.com/manxisuo/mincode/internal/tools"
 	webui "github.com/manxisuo/mincode/web"
@@ -47,6 +48,8 @@ type Server struct {
 	ws           *tools.Workspace
 	instr        *instruction.Loader
 	mem          *memory.Store
+	sessions     *session.Store
+	activeSessID string
 	permMu       sync.Mutex
 	pendingPerms map[string]*pendingPerm
 
@@ -92,6 +95,7 @@ func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observa
 		instr:        instr,
 		pendingPerms: map[string]*pendingPerm{},
 		hub:          newEventHub(),
+		activeSessID: opts.SessionID,
 	}
 	if bus != nil {
 		bus.Subscribe(func(e observability.Event) {
@@ -131,6 +135,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/instructions/reload", s.handleInstructionReload)
 	mux.HandleFunc("GET /api/memory", s.handleMemoryGet)
 	mux.HandleFunc("POST /api/memory", s.handleMemoryAdd)
+	mux.HandleFunc("GET /api/sessions", s.handleSessionList)
+	mux.HandleFunc("GET /api/sessions/current", s.handleSessionCurrent)
+	mux.HandleFunc("POST /api/sessions/{id}/load", s.handleSessionLoad)
 	mux.HandleFunc("GET /api/permissions/pending", s.handlePermissionPending)
 	mux.HandleFunc("POST /api/permissions/{id}", s.handlePermissionDecide)
 
@@ -204,13 +211,14 @@ func (s *Server) handleSession(w http.ResponseWriter, _ *http.Request) {
 		snap = lastResult.Snapshot
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"session_id": s.opts.SessionID,
-		"workspace":  s.opts.Workspace,
-		"provider":   s.opts.Provider,
-		"model":      s.opts.Model,
-		"state":      state,
-		"running":    running,
-		"last_error": lastErr,
+		"session_id":     s.opts.SessionID,
+		"active_session": s.activeSessionID(),
+		"workspace":      s.opts.Workspace,
+		"provider":       s.opts.Provider,
+		"model":          s.opts.Model,
+		"state":          state,
+		"running":        running,
+		"last_error":     lastErr,
 		"turn": map[string]any{
 			"id":         completed,
 			"final":      final,
@@ -259,6 +267,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		res, err := s.agent.Run(ctx, msg)
+		s.saveCurrentSession()
 		s.mu.Lock()
 		s.running = false
 		s.cancelTurn = nil

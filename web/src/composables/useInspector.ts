@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted, ref } from "vue";
 import { apiCancel, apiChat, apiMetrics, apiSession } from "../api";
+import { apiSessionLoad } from "../sessionApi";
 import type { ChatMessage, ContextSnapshot, MetricsInfo, RuntimeEvent, SessionInfo } from "../types";
 
 function msgId(): string {
@@ -334,6 +335,39 @@ export function useInspector() {
     }
   }
 
+  /** Replace chat bubbles with a restored session's user/assistant turns. */
+  async function loadSession(id: string) {
+    lastErrorShown.value = "";
+    streamMsgId = null;
+    streamPending = "";
+    lastAssistantText = "";
+    lastFinalTurnId = -1;
+    const data = await apiSessionLoad(id);
+    messages.value = [];
+    for (const m of data.messages || []) {
+      const role = (m.role === "user" || m.role === "assistant" || m.role === "system")
+        ? m.role
+        : "system";
+      addMessage(role, m.content);
+    }
+    addSystemOnce(`restored session ${data.id} · ${data.entries ?? data.messages.length} entries`);
+    session.value = {
+      ...(session.value || {
+        session_id: "",
+        workspace: "",
+        provider: "",
+        model: "",
+        state: "IDLE",
+        running: false,
+      }),
+      state: "IDLE",
+      running: false,
+      last_error: "",
+      turn: { final: "" },
+    };
+    void refreshSession();
+  }
+
   function boot() {
     connectSSE();
     void refreshSession().catch(() => addMessage("system", "无法连接 API — 请先运行 mincode web"));
@@ -362,6 +396,7 @@ export function useInspector() {
     connected,
     send,
     cancel,
+    loadSession,
     eventClass,
     shortType,
     previewData,

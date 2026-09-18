@@ -917,6 +917,22 @@ button.linkish:hover:not(:disabled) {
   background: var(--panel-2);
 }
 
+.sess-panel {
+  overflow: auto;
+  padding-bottom: 16px;
+}
+.sess-panel .head-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.sess-list {
+  padding: 10px 14px 16px;
+}
+.sess-list .skill-card {
+  margin-bottom: 8px;
+}
+
 .perm-overlay {
   position: fixed;
   inset: 0;

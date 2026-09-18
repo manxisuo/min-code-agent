@@ -17,6 +17,7 @@ import (
 	"github.com/manxisuo/mincode/internal/paths"
 	"github.com/manxisuo/mincode/internal/permission"
 	"github.com/manxisuo/mincode/internal/server"
+	"github.com/manxisuo/mincode/internal/session"
 	"github.com/manxisuo/mincode/internal/skill"
 	"github.com/manxisuo/mincode/internal/tools"
 )
@@ -173,6 +174,8 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 	}, ag, bus, metrics, expStore, skillLoader, ws, instrLoader)
 	ag.Approver = srv.WebApprover()
 	srv.SetMemory(memStore)
+	sessStore := session.NewStore(layout.SessionsDir)
+	srv.SetSessions(sessStore)
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,
 		observability.SessionCreatedData{

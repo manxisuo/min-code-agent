@@ -116,4 +116,26 @@ export interface PendingPermission {
   created_at?: string;
 }
 
+export interface SessionListItem {
+  id: string;
+  workspace?: string;
+  provider?: string;
+  model?: string;
+  turns?: number;
+  message_count?: number;
+  updated_at?: string;
+  is_current?: boolean;
+}
+
+export interface SessionLoadResult {
+  ok: boolean;
+  id: string;
+  provider?: string;
+  model?: string;
+  turns?: number;
+  entries?: number;
+  messages: { role: string; content: string }[];
+}
+
+
 
