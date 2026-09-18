@@ -99,13 +99,20 @@ Experiment Framework（run / list / show / compare，含 min/median/avg/max）
 ## 快速开始
 
 ```bash
-# 配置（mincode.yaml 或环境变量）
+# 配置
+cp mincode.yaml.example mincode.yaml
+# 编辑 model / base_url；API Key 用环境变量
 export OPENAI_API_KEY=sk-...
-# mincode.yaml 中可设 provider.base_url / model 等
+# 或 MINCODE_API_KEY / MINCODE_BASE_URL / MINCODE_MODEL
+
+# Web UI 静态资源（embed 用；仓库不提交 dist/）
+cd web && npm install && npm run build && cd ..
 
 go build -o mincode ./cmd/mincode
 ./mincode ./my-project
 ```
+
+完整配置项见 `mincode.yaml.example`。
 
 REPL 内常用命令：
 

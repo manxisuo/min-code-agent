@@ -6,6 +6,10 @@
 .mincode/
 exports/
 
+# Local provider secrets / machine-specific config (copy from mincode.yaml.example)
+mincode.yaml
+mincode.yml
+
 # Go
 *.test
 *.out

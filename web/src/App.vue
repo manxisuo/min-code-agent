@@ -4,6 +4,9 @@ import ChatPanel from "./components/ChatPanel.vue";
 import ExperimentPanel from "./components/ExperimentPanel.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import { useInspector } from "./composables/useInspector";
+import { useTheme } from "./theme";
+
+const { theme, toggle } = useTheme();
 
 const {
   messages,
@@ -29,6 +32,7 @@ const meta = computed(() => {
   if (!s) return "connecting…";
   return `${s.session_id} · ${s.provider}/${s.model} · ${s.workspace}`;
 });
+const themeLabel = computed(() => (theme.value === "dark" ? "Light" : "Dark"));
 
 function onInput(v: string) {
   input.value = v;
@@ -66,6 +70,9 @@ function onSend() {
             Experiments
           </button>
         </nav>
+        <button type="button" class="theme-btn" :title="'切换到' + themeLabel + '主题'" @click="toggle()">
+          {{ theme === "dark" ? "🌙" : "☀" }} {{ themeLabel }}
+        </button>
         <span class="pill" :data-state="stateLabel">{{ stateLabel }}</span>
         <button type="button" :disabled="!running" @click="cancel()">Cancel</button>
       </div>

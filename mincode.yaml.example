@@ -1,0 +1,126 @@
+# Min Code Agent — 完整配置示例
+#
+# 使用方式：
+#   cp mincode.yaml.example mincode.yaml
+#   # 再按需修改（API Key 建议只用环境变量，不要写进文件提交）
+#
+# 查找顺序（未指定 --config 时）：
+#   <workspace>/mincode.yaml
+#   <workspace>/mincode.yml
+#   ./mincode.yaml
+#   ./mincode.yml
+#
+# 环境变量优先于本文件（见各字段注释中的 ENV 名）。
+# 未写出的字段会使用内置默认值（见 internal/config.Default / normalize）。
+
+# ---------------------------------------------------------------------------
+# provider：LLM 后端（核心 Runtime 只依赖内部 Provider 接口，可替换）
+# ---------------------------------------------------------------------------
+provider:
+  # 后端类型。
+  #   openai-compatible — 任意 OpenAI 兼容 /v1/chat/completions
+  #   fake              — 离线脚本，测试 / 演示用，不访问网络
+  # ENV: MINCODE_PROVIDER_TYPE
+  # 默认: openai-compatible
+  type: openai-compatible
+
+  # OpenAI 兼容 API 根地址（不含最后的 /chat/completions）。
+  # 例：https://api.openai.com/v1
+  #     https://api.deepseek.com/v1
+  #     http://127.0.0.1:11434/v1   (Ollama 等本地服务，需兼容协议)
+  # ENV: MINCODE_BASE_URL
+  # 默认: https://api.openai.com/v1
+  base_url: https://api.deepseek.com/v1
+
+  # API Key。强烈建议不写在此文件，改用环境变量：
+  #   MINCODE_API_KEY  或  OPENAI_API_KEY
+  # 两者都设置时优先 MINCODE_API_KEY。
+  # 默认: 空（openai-compatible 下为空会报 ErrNoAPIKey）
+  # api_key: sk-...
+
+  # 模型名，原样传给 API 的 model 字段。
+  # ENV: MINCODE_MODEL 或 OPENAI_MODEL（前者优先）
+  # 默认: gpt-4o-mini
+  model: deepseek-chat
+
+  # 采样温度。默认: 0.7
+  temperature: 0.7
+
+  # completion 最大 token（传给 API max_tokens）。0 表示不发送该字段。
+  # ENV: MINCODE_MAX_TOKENS（仅当 >0 时覆盖）
+  # 默认: 0（不限制，由服务商决定）
+  max_tokens: 0
+
+  # 单次 HTTP 请求超时（秒）。默认: 120
+  timeout_sec: 120
+
+  # 是否启用流式输出（OpenAI 兼容 SSE stream=true）。
+  #   true  — 边生成边展示（CLI/Web）；事件 llm.stream_*
+  #   false — 非流式，整段一次返回（旧路径仍保留）
+  # 不支持流式的 Provider 会自动回退非流式。
+  # 默认: true
+  stream: true
+
+# ---------------------------------------------------------------------------
+# agent：Agent Loop、Context、并行工具
+# ---------------------------------------------------------------------------
+agent:
+  # 单次用户输入最多执行多少个「LLM↔Tool」循环步。
+  # 超过后返回 MaxStepsExceeded。默认: 30
+  max_steps: 30
+
+  # 每次 LLM 调用的估算 prompt token 上限（含 system/instructions/tools schema 等）。
+  # 超预算时 Context Manager 会裁剪（排除/截断历史等）。
+  # 默认: 32000
+  token_budget: 32000
+
+  # 历史压缩阈值（估算 token）。
+  #   0  → 使用默认 18000
+  #   <0 → 禁用压缩
+  # 压缩后可在 /context 或 Trace 中看到 before/after/compressed 等。
+  # 默认: 18000
+  compress_at: 18000
+
+  # 一次 LLM 响应里连续的只读工具（read_file/list_dir/glob/grep）是否并行执行。
+  # write_file/edit_file/shell 与未知工具始终串行；需要交互审批的调用回退串行。
+  # 默认: true
+  parallel_tools: true
+
+  # 并行只读工具的并发上限。默认: 4
+  max_parallel: 4
+
+  # 自定义 System Prompt。留空则使用内置 DefaultSystemPrompt
+  #（并会附加平台相关 shell 提示：Windows/cmd vs Unix/sh）。
+  # 填写后将**完全替换**内置提示词，需要时请自行写全工具与安全说明。
+  # 默认: "" → 内置提示词
+  # system_prompt: |
+  #   You are Min Code Agent, ...
+
+# ---------------------------------------------------------------------------
+# memory：跨会话记忆（workspace/MEMORY.md）
+# ---------------------------------------------------------------------------
+memory:
+  # 成功回合结束后，是否可选地让 LLM 提炼一条可持久事实（仍需用户批准）。
+  # 工具 memory_add 始终可由模型调用（策略默认 Ask）。
+  # 默认: false
+  auto_extract: false
+
+# ---------------------------------------------------------------------------
+# trace：结构化事件 JSONL 落盘（可观测）
+# ---------------------------------------------------------------------------
+trace:
+  # Trace 目录（相对路径相对于进程当前工作目录；也可写绝对路径）。
+  # 文件名: <dir>/<session-id>.jsonl
+  # ENV: MINCODE_TRACE_DIR
+  # 默认: .mincode/traces
+  dir: .mincode/traces
+
+# ---------------------------------------------------------------------------
+# 本文件未覆盖、但运行时会用到的路径（非 YAML 配置，仅说明）
+# ---------------------------------------------------------------------------
+# <workspace>/AGENTS.md          层级项目指令（Phase 8）
+# <workspace>/skills/<name>/SKILL.md  技能（Phase 9，/skill 手工激活）
+# <workspace>/MEMORY.md          跨会话事实（Phase 11）
+# <workspace>/.mincode/sessions/ 会话 JSON
+# <workspace>/.mincode/experiments/<name>/ 实验结果（experiment run）
+# Web UI: mincode web  — 静态资源 embed 自 web/dist（需先 npm run build）
