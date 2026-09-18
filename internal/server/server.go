@@ -15,6 +15,7 @@ import (
 	"github.com/manxisuo/mincode/internal/experiment"
 	"github.com/manxisuo/mincode/internal/observability"
 	"github.com/manxisuo/mincode/internal/plan"
+	"github.com/manxisuo/mincode/internal/skill"
 	webui "github.com/manxisuo/mincode/web"
 )
 
@@ -39,6 +40,7 @@ type Server struct {
 	traceDir    string
 	plans       *plan.Manager
 	planMu      sync.Mutex
+	skills      *skill.Loader
 
 	hub *eventHub
 
@@ -57,8 +59,8 @@ type Server struct {
 
 // New wires an agent + bus into an HTTP server. Subscribe on the bus so all
 // runtime events fan out to SSE clients without touching the agent loop.
-// exp may be nil when experiment APIs should report empty lists.
-func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store) *Server {
+// exp and skills may be nil when those APIs should report empty lists.
+func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store, skills *skill.Loader) *Server {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:8080"
 	}
@@ -77,6 +79,7 @@ func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observa
 		experiments: exp,
 		traceDir:    traceDir,
 		plans:       plan.NewManager(),
+		skills:      skills,
 		hub:         newEventHub(),
 	}
 	if bus != nil {
@@ -108,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/plan/approve", s.handlePlanApprove)
 	mux.HandleFunc("POST /api/plan/reject", s.handlePlanReject)
 	mux.HandleFunc("POST /api/plan/cancel", s.handlePlanCancel)
+	mux.HandleFunc("GET /api/skills", s.handleSkillList)
+	mux.HandleFunc("GET /api/skills/{name}", s.handleSkillShow)
 
 	static, err := fs.Sub(webui.FS, "dist")
 	if err == nil {

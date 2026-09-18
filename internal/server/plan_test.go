@@ -9,7 +9,7 @@ import (
 
 func TestPlanGetEmpty(t *testing.T) {
 	ag, bus, metrics := testAgent(t)
-	srv := New(Options{SessionID: "p1", Workspace: t.TempDir()}, ag, bus, metrics, nil)
+	srv := New(Options{SessionID: "p1", Workspace: t.TempDir()}, ag, bus, metrics, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

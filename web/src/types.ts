@@ -93,3 +93,17 @@ export interface ChatMessage {
   /** Local time when the bubble was first shown (ISO string). */
   ts?: string;
 }
+
+export interface SkillListItem {
+  name: string;
+  rel_path: string;
+  summary?: string;
+  active?: boolean;
+  bytes?: number;
+}
+
+export interface SkillDetail extends SkillListItem {
+  path?: string;
+  content: string;
+}
+
