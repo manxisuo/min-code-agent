@@ -107,3 +107,13 @@ export interface SkillDetail extends SkillListItem {
   content: string;
 }
 
+export interface PendingPermission {
+  id: string;
+  tool: string;
+  arguments?: string;
+  summary?: string;
+  diff?: string;
+  created_at?: string;
+}
+
+

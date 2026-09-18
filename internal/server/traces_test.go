@@ -34,7 +34,7 @@ func TestTraceListAndShow(t *testing.T) {
 	}
 
 	ag, bus, metrics := testAgent(t)
-	srv := New(Options{SessionID: "sess-1", Workspace: t.TempDir(), TraceDir: traces}, ag, bus, metrics, nil, nil)
+	srv := New(Options{SessionID: "sess-1", Workspace: t.TempDir(), TraceDir: traces}, ag, bus, metrics, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

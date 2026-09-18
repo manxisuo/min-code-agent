@@ -17,3 +17,17 @@ export function apiSkill(name: string) {
     "/api/skills/" + encodeURIComponent(name),
   );
 }
+
+export function apiSkillActivate(name: string) {
+  return fetchJSON<{ ok: boolean; name: string; active: boolean; newly?: boolean }>(
+    "/api/skills/" + encodeURIComponent(name) + "/activate",
+    { method: "POST" },
+  );
+}
+
+export function apiSkillDeactivate(name: string) {
+  return fetchJSON<{ ok: boolean; name: string; active: boolean }>(
+    "/api/skills/" + encodeURIComponent(name) + "/deactivate",
+    { method: "POST" },
+  );
+}

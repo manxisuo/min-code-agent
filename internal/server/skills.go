@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/manxisuo/mincode/internal/observability"
 	"github.com/manxisuo/mincode/internal/skill"
 	"github.com/manxisuo/mincode/internal/strutil"
 )
@@ -90,4 +91,81 @@ func (s *Server) handleSkillShow(w http.ResponseWriter, r *http.Request) {
 		"active":   s.skills.IsActive(sk.Name),
 		"bytes":    len(sk.Content),
 	})
+}
+
+func (s *Server) syncSkillsToAgent() {
+	if s.skills == nil || s.agent == nil || s.agent.Ctx == nil {
+		return
+	}
+	s.agent.Ctx.SetSkills(s.skills.Compose())
+}
+
+func (s *Server) handleSkillActivate(w http.ResponseWriter, r *http.Request) {
+	if s.skills == nil {
+		writeErr(w, http.StatusNotFound, "skills unavailable")
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		writeErr(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
+	sk, newly, err := s.skills.Activate(name)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err.Error())
+		return
+	}
+	s.syncSkillsToAgent()
+	if newly {
+		s.emitSkill(observability.EventSkillLoaded, observability.SkillEventData{
+			Name:    sk.Name,
+			RelPath: sk.RelPath,
+			Bytes:   len(sk.Content),
+			Summary: sk.Summary,
+			Reason:  "web",
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"name":          sk.Name,
+		"active":        true,
+		"newly":         newly,
+		"active_count":  s.skills.CountActive(),
+		"context_chars": len(s.skills.Compose()),
+	})
+}
+
+func (s *Server) handleSkillDeactivate(w http.ResponseWriter, r *http.Request) {
+	if s.skills == nil {
+		writeErr(w, http.StatusNotFound, "skills unavailable")
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || strings.ContainsAny(name, `/\`) {
+		writeErr(w, http.StatusBadRequest, "invalid skill name")
+		return
+	}
+	if !s.skills.Deactivate(name) {
+		writeErr(w, http.StatusConflict, "skill is not active: "+name)
+		return
+	}
+	s.syncSkillsToAgent()
+	s.emitSkill(observability.EventSkillUnloaded, observability.SkillEventData{
+		Name:   name,
+		Reason: "web",
+	})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":            true,
+		"name":          name,
+		"active":        false,
+		"active_count":  s.skills.CountActive(),
+		"context_chars": len(s.skills.Compose()),
+	})
+}
+
+func (s *Server) emitSkill(typ observability.EventType, data observability.SkillEventData) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(observability.NewEvent(s.opts.SessionID, s.agentCtxLen(), typ, data))
 }

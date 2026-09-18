@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from "vue";
-import { apiSkill, apiSkills } from "../skillApi";
+import {
+  apiSkill,
+  apiSkillActivate,
+  apiSkillDeactivate,
+  apiSkills,
+} from "../skillApi";
 import type { SkillDetail, SkillListItem } from "../types";
 import MdText from "./MdText.vue";
 
@@ -12,6 +17,7 @@ const contextChars = ref(0);
 const error = ref("");
 const selected = ref<SkillDetail | null>(null);
 const loading = ref(false);
+const busyName = ref("");
 
 async function refresh() {
   error.value = "";
@@ -45,6 +51,27 @@ function closeDetail() {
   selected.value = null;
 }
 
+async function toggleActive(name: string, active: boolean, ev?: Event) {
+  ev?.stopPropagation();
+  busyName.value = name;
+  error.value = "";
+  try {
+    if (active) {
+      await apiSkillDeactivate(name);
+    } else {
+      await apiSkillActivate(name);
+    }
+    await refresh();
+    if (selected.value?.name === name) {
+      selected.value = await apiSkill(name);
+    }
+  } catch (e) {
+    error.value = String((e as Error).message || e);
+  } finally {
+    busyName.value = "";
+  }
+}
+
 let poll: number | null = null;
 onMounted(() => {
   void refresh();
@@ -67,7 +94,8 @@ onBeforeUnmount(() => {
 
     <div v-if="error" class="exp-error">{{ error }}</div>
     <div v-if="skillsDirAbs" class="skills-meta">
-      dir: {{ skillsDirAbs }} · in context: {{ activeCount }} skill(s), {{ contextChars }} chars
+      dir: {{ skillsDirAbs }} · in context: {{ activeCount }} skill(s),
+      {{ contextChars }} chars
     </div>
 
     <div class="skills-body">
@@ -76,13 +104,15 @@ onBeforeUnmount(() => {
           no skills found — put them in
           <code>skills/&lt;name&gt;/SKILL.md</code>
         </div>
-        <button
+        <div
           v-for="sk in skills"
           :key="sk.name"
-          type="button"
           class="skill-card"
           :class="{ active: sk.active, selected: selected?.name === sk.name }"
+          role="button"
+          tabindex="0"
           @click="open(sk.name)"
+          @keydown.enter="open(sk.name)"
         >
           <div class="skill-name">
             <span class="mark">{{ sk.active ? "●" : "○" }}</span>
@@ -91,12 +121,23 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="sk.summary" class="skill-sum">{{ sk.summary }}</div>
           <div class="skill-path">{{ sk.rel_path }} · {{ sk.bytes }}B</div>
-        </button>
+          <div class="skill-actions">
+            <button
+              type="button"
+              class="linkish"
+              :disabled="busyName === sk.name"
+              @click="toggleActive(sk.name, !!sk.active, $event)"
+            >
+              {{ sk.active ? "停用" : "激活" }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="skills-detail">
         <div v-if="!selected" class="empty">
-          选择左侧 skill 查看 SKILL.md 全文（与 CLI /skills 列表对应）
+          选择左侧 skill 查看 SKILL.md；点「激活」注入 Context（等价
+          <code>/skill &lt;name&gt;</code>）
         </div>
         <template v-else>
           <div class="skills-detail-head">
@@ -105,7 +146,18 @@ onBeforeUnmount(() => {
               <span v-if="selected.active" class="tag-on">active</span>
               <div class="hint">{{ selected.rel_path }}</div>
             </div>
-            <button type="button" class="linkish" @click="closeDetail()">关闭</button>
+            <div class="skill-actions">
+              <button
+                type="button"
+                :disabled="busyName === selected.name"
+                @click="toggleActive(selected.name, !!selected.active)"
+              >
+                {{ selected.active ? "停用" : "激活" }}
+              </button>
+              <button type="button" class="linkish" @click="closeDetail()">
+                关闭
+              </button>
+            </div>
           </div>
           <div class="skills-md">
             <MdText :content="selected.content" />

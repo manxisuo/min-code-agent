@@ -16,6 +16,7 @@ import (
 	"github.com/manxisuo/mincode/internal/observability"
 	"github.com/manxisuo/mincode/internal/plan"
 	"github.com/manxisuo/mincode/internal/skill"
+	"github.com/manxisuo/mincode/internal/tools"
 	webui "github.com/manxisuo/mincode/web"
 )
 
@@ -32,15 +33,18 @@ type Options struct {
 
 // Server exposes Agent runtime over HTTP + SSE for the local Web UI.
 type Server struct {
-	opts        Options
-	agent       *agent.Agent
-	bus         *observability.Bus
-	metrics     *observability.MetricsCollector
-	experiments *experiment.Store
-	traceDir    string
-	plans       *plan.Manager
-	planMu      sync.Mutex
-	skills      *skill.Loader
+	opts         Options
+	agent        *agent.Agent
+	bus          *observability.Bus
+	metrics      *observability.MetricsCollector
+	experiments  *experiment.Store
+	traceDir     string
+	plans        *plan.Manager
+	planMu       sync.Mutex
+	skills       *skill.Loader
+	ws           *tools.Workspace
+	permMu       sync.Mutex
+	pendingPerms map[string]*pendingPerm
 
 	hub *eventHub
 
@@ -60,7 +64,7 @@ type Server struct {
 // New wires an agent + bus into an HTTP server. Subscribe on the bus so all
 // runtime events fan out to SSE clients without touching the agent loop.
 // exp and skills may be nil when those APIs should report empty lists.
-func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store, skills *skill.Loader) *Server {
+func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store, skills *skill.Loader, ws *tools.Workspace) *Server {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:8080"
 	}
@@ -72,15 +76,17 @@ func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observa
 		traceDir = ".mincode/traces"
 	}
 	s := &Server{
-		opts:        opts,
-		agent:       ag,
-		bus:         bus,
-		metrics:     metrics,
-		experiments: exp,
-		traceDir:    traceDir,
-		plans:       plan.NewManager(),
-		skills:      skills,
-		hub:         newEventHub(),
+		opts:         opts,
+		agent:        ag,
+		bus:          bus,
+		metrics:      metrics,
+		experiments:  exp,
+		traceDir:     traceDir,
+		plans:        plan.NewManager(),
+		skills:       skills,
+		ws:           ws,
+		pendingPerms: map[string]*pendingPerm{},
+		hub:          newEventHub(),
 	}
 	if bus != nil {
 		bus.Subscribe(func(e observability.Event) {
@@ -113,6 +119,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/plan/cancel", s.handlePlanCancel)
 	mux.HandleFunc("GET /api/skills", s.handleSkillList)
 	mux.HandleFunc("GET /api/skills/{name}", s.handleSkillShow)
+	mux.HandleFunc("POST /api/skills/{name}/activate", s.handleSkillActivate)
+	mux.HandleFunc("POST /api/skills/{name}/deactivate", s.handleSkillDeactivate)
+	mux.HandleFunc("GET /api/permissions/pending", s.handlePermissionPending)
+	mux.HandleFunc("POST /api/permissions/{id}", s.handlePermissionDecide)
 
 	static, err := fs.Sub(webui.FS, "dist")
 	if err == nil {
@@ -259,6 +269,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleCancel(w http.ResponseWriter, _ *http.Request) {
+	s.denyAllPending()
 	s.mu.Lock()
 	cancel := s.cancelTurn
 	s.mu.Unlock()

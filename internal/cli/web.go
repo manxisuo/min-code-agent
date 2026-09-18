@@ -120,7 +120,7 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 	}
 	ag.MaxParallel = cfg.Agent.MaxParallel
 	ag.Stream = cfg.StreamEnabled()
-	ag.Approver = localWebApprover{}
+	// Approver set after server.New so pending requests can reach the web UI.
 
 	registry.Register(&tools.MemoryAdd{
 		Store: memStore,
@@ -170,7 +170,8 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		Provider:  provider.Name(),
 		Model:     provider.Model(),
 		TraceDir:  traceDir,
-	}, ag, bus, metrics, expStore, skillLoader)
+	}, ag, bus, metrics, expStore, skillLoader, ws)
+	ag.Approver = srv.WebApprover()
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,
 		observability.SessionCreatedData{
@@ -187,7 +188,7 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 	fmt.Printf("  traces     %s\n", traceDir)
 	fmt.Printf("  trace file %s\n", tracePath)
 	fmt.Printf("  listening  http://%s\n", addr)
-	fmt.Printf("  note       W1 本地单用户；Ask 级写操作自动批准（危险 shell 仍拒绝）\n\n")
+	fmt.Printf("  note       Ask 级操作将在网页审批；危险 shell 仍由策略拒绝\n\n")
 
 	return srv.ListenAndServe(ctx)
 }

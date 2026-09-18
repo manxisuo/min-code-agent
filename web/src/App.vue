@@ -4,6 +4,7 @@ import ChatPanel from "./components/ChatPanel.vue";
 import ExperimentPanel from "./components/ExperimentPanel.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
 import PlanPanel from "./components/PlanPanel.vue";
+import PermissionBar from "./components/PermissionBar.vue";
 import SkillsPanel from "./components/SkillsPanel.vue";
 import { useInspector } from "./composables/useInspector";
 import { useTheme } from "./theme";
@@ -47,6 +48,7 @@ function onSend() {
 
 <template>
   <div class="app-shell">
+    <PermissionBar />
     <header class="top">
       <div class="brand">
         <span class="logo">MC</span>

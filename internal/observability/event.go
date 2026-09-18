@@ -197,12 +197,14 @@ type LoopDetectedData struct {
 
 // PermissionData is payload for permission.* events.
 type PermissionData struct {
+	ID        string `json:"id,omitempty"`
 	Tool      string `json:"tool"`
 	Arguments string `json:"arguments,omitempty"`
 	Summary   string `json:"summary,omitempty"`
 	Level     string `json:"level,omitempty"`
 	Decision  string `json:"decision,omitempty"` // approved | denied
 	Reason    string `json:"reason,omitempty"`
+	Diff      string `json:"diff,omitempty"`
 }
 
 // FileChangedData is payload for file.changed.
