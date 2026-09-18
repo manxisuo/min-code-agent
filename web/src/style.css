@@ -349,7 +349,7 @@ button.linkish:hover:not(:disabled) {
 .context .empty { color: var(--muted); font-size: 13px; }
 .ctx-row {
   display: grid;
-  grid-template-columns: 120px 1fr 56px;
+  grid-template-columns: 168px 1fr 56px;
   gap: 8px;
   align-items: center;
   margin-bottom: 6px;
@@ -365,16 +365,28 @@ button.linkish:hover:not(:disabled) {
 .ctx-row-summary.open {
   background: var(--panel-2);
 }
-.ctx-row .src { color: var(--muted); }
+.ctx-row .src {
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .ctx-row .src .chev {
   display: inline-block;
   width: 12px;
   color: var(--ink);
 }
+.ctx-row .src .idx {
+  color: var(--accent);
+  opacity: 0.85;
+  margin-right: 4px;
+  font-size: 11px;
+}
 .ctx-row .src .cnt {
   margin-left: 4px;
   opacity: 0.7;
   font-size: 11px;
+  white-space: nowrap;
 }
 .ctx-bar {
   height: 8px;

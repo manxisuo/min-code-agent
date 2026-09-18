@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import type { ContextSnapshot, MetricsInfo, RuntimeEvent } from "../types";
+import type { ContextItem, ContextSnapshot, MetricsInfo, RuntimeEvent } from "../types";
 
 const props = defineProps<{
   metrics: MetricsInfo;
@@ -13,6 +13,7 @@ const props = defineProps<{
 }>();
 
 type ItemRow = {
+  index: number;
   source: string;
   role?: string;
   preview: string;
@@ -24,24 +25,19 @@ type ItemRow = {
   reason?: string;
 };
 
-const showAllDetail = ref(false);
+type RunRow = {
+  id: string;
+  source: string;
+  count: number;
+  tok: number;
+  start: number; // 0-based index in snapshot.items
+  end: number;
+  excluded: boolean;
+  items: ItemRow[];
+  pct: number;
+};
+
 const expanded = ref<Set<string>>(new Set());
-
-function toggleSource(source: string) {
-  const next = new Set(expanded.value);
-  if (next.has(source)) next.delete(source);
-  else next.add(source);
-  expanded.value = next;
-}
-
-function toggleAll() {
-  showAllDetail.value = !showAllDetail.value;
-  if (showAllDetail.value) {
-    expanded.value = new Set(ctxRows.value.map((r) => r.source));
-  } else {
-    expanded.value = new Set();
-  }
-}
 
 function truncatePreview(s: string, n = 72): string {
   const t = (s || "").replace(/\s+/g, " ").trim();
@@ -49,57 +45,71 @@ function truncatePreview(s: string, n = 72): string {
   return t.slice(0, n) + "…";
 }
 
-const detailBySource = computed(() => {
-  const map = new Map<string, ItemRow[]>();
-  for (const i of props.snapshot?.items || []) {
-    const source = i.source || "unknown";
-    const row: ItemRow = {
-      source,
-      role: i.role,
-      preview: truncatePreview(i.preview || ""),
-      tok: i.token_count || 0,
-      included: !!i.included,
-      excluded: !!i.excluded,
-      truncated: !!i.truncated,
-      pinned: !!i.pinned,
-      reason: i.reason,
-    };
-    const list = map.get(source);
-    if (list) list.push(row);
-    else map.set(source, [row]);
-  }
-  for (const list of map.values()) {
-    list.sort((a, b) => b.tok - a.tok);
-  }
-  return map;
-});
+function toItemRow(i: ContextItem, index: number): ItemRow {
+  return {
+    index,
+    source: i.source || "unknown",
+    role: i.role,
+    preview: truncatePreview(i.preview || ""),
+    tok: i.token_count || 0,
+    included: !!i.included,
+    excluded: !!i.excluded,
+    truncated: !!i.truncated,
+    pinned: !!i.pinned,
+    reason: i.reason,
+  };
+}
 
-/** Aggregate items by source so long sessions stay compact. */
-const ctxRows = computed(() => {
+/**
+ * Run-length fold: merge only consecutive items with the same source.
+ * Preserves original context order (history/tool_result may interleave).
+ */
+const ctxRuns = computed<RunRow[]>(() => {
   const items = props.snapshot?.items || [];
-  const acc = new Map<
-    string,
-    { source: string; tok: number; count: number; excluded: boolean }
-  >();
-  for (const i of items) {
-    const key = i.source || "unknown";
-    const prev = acc.get(key);
-    const tok = i.token_count || 0;
-    if (prev) {
-      prev.tok += tok;
-      prev.count += 1;
-      if (!i.excluded) prev.excluded = false;
+  const runs: Omit<RunRow, "pct">[] = [];
+  for (let idx = 0; idx < items.length; idx++) {
+    const row = toItemRow(items[idx], idx);
+    const last = runs[runs.length - 1];
+    if (last && last.source === row.source) {
+      last.items.push(row);
+      last.tok += row.tok;
+      last.count += 1;
+      last.end = idx;
+      if (!row.excluded) last.excluded = false;
     } else {
-      acc.set(key, { source: key, tok, count: 1, excluded: !!i.excluded });
+      runs.push({
+        id: `run-${idx}`,
+        source: row.source,
+        count: 1,
+        tok: row.tok,
+        start: idx,
+        end: idx,
+        excluded: row.excluded,
+        items: [row],
+      });
     }
   }
-  const rows = [...acc.values()].sort((a, b) => b.tok - a.tok);
-  const maxTok = Math.max(1, ...rows.map((r) => r.tok));
-  return rows.map((r) => ({
+  const maxTok = Math.max(1, ...runs.map((r) => r.tok));
+  return runs.map((r) => ({
     ...r,
     pct: Math.max(2, Math.round((r.tok / maxTok) * 100)),
   }));
 });
+
+function toggleRun(id: string) {
+  const next = new Set(expanded.value);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  expanded.value = next;
+}
+
+function toggleAll() {
+  if (expanded.value.size > 0) {
+    expanded.value = new Set();
+    return;
+  }
+  expanded.value = new Set(ctxRuns.value.map((r) => r.id));
+}
 
 const ctxTotal = computed(() => {
   const s = props.snapshot;
@@ -124,50 +134,52 @@ const ctxTotal = computed(() => {
     </div>
 
     <div class="subhead">
-      <span>Context snapshot <span class="hint">by source · click to expand</span></span>
+      <span>
+        Context snapshot
+        <span class="hint">in order · consecutive runs folded</span>
+      </span>
       <button
-        v-if="ctxRows.length"
+        v-if="ctxRuns.length"
         type="button"
         class="linkish"
-        @click="toggleAll"
+        @click="toggleAll()"
       >
-        {{ showAllDetail ? "折叠全部" : "展开全部" }}
+        {{ expanded.size > 0 ? "折叠全部" : "展开全部" }}
       </button>
     </div>
     <div class="context">
-      <div v-if="!ctxRows.length" class="empty">尚无快照</div>
+      <div v-if="!ctxRuns.length" class="empty">尚无快照</div>
       <template v-else>
-        <template v-for="row in ctxRows" :key="row.source">
+        <template v-for="run in ctxRuns" :key="run.id">
           <div
             class="ctx-row ctx-row-summary"
-            :class="{ excluded: row.excluded, open: expanded.has(row.source) }"
+            :class="{ excluded: run.excluded, open: expanded.has(run.id) }"
             role="button"
             tabindex="0"
-            @click="toggleSource(row.source)"
-            @keydown.enter.prevent="toggleSource(row.source)"
-            @keydown.space.prevent="toggleSource(row.source)"
+            @click="toggleRun(run.id)"
+            @keydown.enter.prevent="toggleRun(run.id)"
+            @keydown.space.prevent="toggleRun(run.id)"
           >
             <div class="src">
-              <span class="chev">{{ expanded.has(row.source) ? "▾" : "▸" }}</span>
-              {{ row.source }}
-              <span v-if="row.count > 1" class="cnt">×{{ row.count }}</span>
+              <span class="chev">{{ expanded.has(run.id) ? "▾" : "▸" }}</span>
+              <span class="idx">#{{ run.start }}</span>
+              {{ run.source }}
+              <span v-if="run.count > 1" class="cnt">×{{ run.count }}</span>
             </div>
-            <div class="ctx-bar"><i :style="{ width: row.pct + '%' }" /></div>
-            <div class="tok">{{ row.tok }}</div>
+            <div class="ctx-bar"><i :style="{ width: run.pct + '%' }" /></div>
+            <div class="tok">{{ run.tok }}</div>
           </div>
 
-          <div v-if="expanded.has(row.source)" class="ctx-detail">
+          <div v-if="expanded.has(run.id)" class="ctx-detail">
             <div
-              v-for="(item, di) in detailBySource.get(row.source) || []"
-              :key="row.source + '-' + di"
+              v-for="item in run.items"
+              :key="run.id + '-' + item.index"
               class="ctx-detail-row"
-              :class="{
-                excluded: item.excluded,
-                truncated: item.truncated,
-              }"
+              :class="{ excluded: item.excluded, truncated: item.truncated }"
             >
               <div class="d-tok">{{ item.tok }}</div>
               <div class="d-meta">
+                <span class="tag">#{{ item.index }}</span>
                 <span v-if="item.role" class="tag">{{ item.role }}</span>
                 <span v-if="item.excluded" class="tag warn">excluded</span>
                 <span v-else-if="item.truncated" class="tag warn">truncated</span>
@@ -183,6 +195,7 @@ const ctxTotal = computed(() => {
         <div class="ctx-total">
           Total <b>{{ ctxTotal }}</b> / budget {{ snapshot?.budget ?? "-" }}
           · step {{ snapshot?.step ?? "-" }}
+          · items {{ snapshot?.items?.length ?? 0 }}
           · incl {{ snapshot?.included_count ?? 0 }}
           · excl {{ snapshot?.excluded_count ?? 0 }}
         </div>
