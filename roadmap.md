@@ -507,7 +507,7 @@ Timeline 区分「首个增量」与「聚合完成」
 ```text
 cmd: mincode web [workspace] [--addr]
 internal/server: /api/session|chat|cancel|events(SSE)|context|metrics|timeline
-web/: index.html + style.css + app.js（embed）
+web/: Vue3 + TS（Vite）→ dist/ → go:embed
 Bus.Subscribe → SSE fan-out（不侵入 Agent Loop）
 ```
 

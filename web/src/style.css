@@ -10,19 +10,40 @@
   --warn: #d29922;
   --err: #f85149;
   --user: #243044;
-  --mono: ui-monospace, "Cascadia Code", "Consolas", monospace;
+  --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html, body, #app { height: 100%; margin: 0; }
 body {
   font: 14px/1.5 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--ink);
   background: var(--bg);
+}
+
+button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.app-shell {
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
-
 .top {
   display: flex;
   align-items: center;
@@ -38,6 +59,7 @@ body {
   background: linear-gradient(135deg, #3b6fff, #7a5cff);
   font-weight: 700; font-size: 12px;
 }
+.brand strong { display: block; }
 .meta { color: var(--muted); font-size: 12px; font-family: var(--mono); }
 .top-right { display: flex; gap: 10px; align-items: center; }
 
@@ -52,23 +74,11 @@ body {
 }
 .pill[data-state="EXECUTING_TOOL"],
 .pill[data-state="CALLING_LLM"],
-.pill[data-state="BUILDING_CONTEXT"] { color: var(--warn); border-color: var(--warn); }
+.pill[data-state="BUILDING_CONTEXT"],
+.pill[data-state="PROCESSING_RESPONSE"] { color: var(--warn); border-color: var(--warn); }
 .pill[data-state="FINISHED"] { color: var(--ok); border-color: var(--ok); }
 .pill[data-state="FAILED"],
 .pill[data-state="CANCELLED"] { color: var(--err); border-color: var(--err); }
-
-button {
-  font: inherit;
-  color: var(--ink);
-  background: var(--panel-2);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
-}
-button:hover:not(:disabled) { border-color: var(--accent); }
-button:disabled { opacity: 0.45; cursor: not-allowed; }
-#btnSend { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
 
 .layout {
   flex: 1;
@@ -77,6 +87,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   grid-template-columns: minmax(320px, 1.1fr) minmax(320px, 1fr);
   gap: 12px;
   padding: 12px;
+}
+@media (max-width: 960px) {
+  .layout { grid-template-columns: 1fr; }
 }
 
 .panel {
@@ -95,7 +108,13 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 10px 14px;
   border-bottom: 1px solid var(--line);
 }
-.panel-head h2 { margin: 0; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.panel-head h2 {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .hint { color: var(--muted); font-size: 12px; }
 
 .messages {
@@ -130,7 +149,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--line);
-  background: var(--panel);
 }
 .composer textarea {
   resize: none;
@@ -188,14 +206,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   overflow: hidden;
   border: 1px solid var(--line);
 }
-.ctx-bar i {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-}
+.ctx-bar i { display: block; height: 100%; background: var(--accent); }
 .ctx-row.excluded .ctx-bar i { background: var(--line); }
-.ctx-row .tok { text-align: right; color: var(--ink); }
-
+.ctx-row .tok { text-align: right; }
 .ctx-total {
   margin-top: 8px;
   font-family: var(--mono);
@@ -215,7 +228,6 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   padding: 6px 8px;
   border-left: 2px solid var(--line);
   margin: 0 0 4px 6px;
-  color: var(--ink);
 }
 .tl-item .t { color: var(--muted); margin-right: 8px; }
 .tl-item .ty { margin-right: 8px; }
@@ -224,8 +236,3 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .tl-item.batch .ty { color: var(--warn); }
 .tl-item.err .ty { color: var(--err); }
 .tl-item .d { color: var(--muted); word-break: break-all; }
-
-@media (max-width: 960px) {
-  .layout { grid-template-columns: 1fr; }
-  .metrics { grid-template-columns: repeat(3, 1fr); }
-}

@@ -75,7 +75,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/timeline", s.handleTimeline)
 
-	static, err := fs.Sub(webui.FS, ".")
+	static, err := fs.Sub(webui.FS, "dist")
 	if err == nil {
 		fileServer := http.FileServer(http.FS(static))
 		mux.Handle("GET /", fileServer)

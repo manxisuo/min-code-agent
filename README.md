@@ -138,8 +138,17 @@ mincode web              # 默认 http://127.0.0.1:8080
 mincode web . --addr 127.0.0.1:9090
 ```
 
-浏览器打开后左侧对话、右侧实时 Timeline / Context / Metrics。  
-静态页在 `web/`（`index.html` / `style.css` / `app.js`），由 Go `embed` 托管。
+浏览器打开后左侧对话、右侧实时 Timeline / Context / Metrics。
+
+前端为 **Vue 3 + TypeScript**（`web/`），生产资源由 Vite 构建到 `web/dist/`，再 `embed` 进二进制：
+
+```bash
+cd web
+npm install
+npm run build    # 产出 dist/，随后 go build 使用 embed
+```
+
+改前端后需重新 `npm run build && go build`。开发调试可用 `cd web && npm run dev`（代理 `/api` 到 8080）。
 
 后续计划含 **LLM 流式输出**（边生成边展示、取消更早中断），详见 `roadmap.md`。
 
