@@ -45,6 +45,11 @@ type Server struct {
 	lastResult  *agent.Result
 	lastErr     string
 	turnStarted time.Time
+	// turnSeq increments on each /api/chat; completedTurn is the turn
+	// whose result is in lastResult. Prevents stale finals from being
+	// re-served as the "current" answer while a new turn runs.
+	turnSeq        int
+	completedTurn  int
 }
 
 // New wires an agent + bus into an HTTP server. Subscribe on the bus so all
@@ -149,11 +154,13 @@ func (s *Server) handleSession(w http.ResponseWriter, _ *http.Request) {
 	lastResult := s.lastResult
 	lastErr := s.lastErr
 	started := s.turnStarted
+	completed := s.completedTurn
 	s.mu.Unlock()
 
 	var final string
 	var steps, toolCalls int
-	if lastResult != nil {
+	// Only expose the last answer when no turn is in flight.
+	if !running && lastResult != nil {
 		final = lastResult.Final
 		steps = lastResult.Steps
 		toolCalls = lastResult.ToolCalls
@@ -171,6 +178,7 @@ func (s *Server) handleSession(w http.ResponseWriter, _ *http.Request) {
 		"running":    running,
 		"last_error": lastErr,
 		"turn": map[string]any{
+			"id":         completed,
 			"final":      final,
 			"steps":      steps,
 			"tool_calls": toolCalls,
@@ -208,6 +216,10 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.running = true
 	s.lastErr = ""
 	s.turnStarted = time.Now().UTC()
+	s.turnSeq++
+	turn := s.turnSeq
+	// Drop previous final so clients polling mid-turn do not re-append it.
+	s.lastResult = nil
 	s.mu.Unlock()
 
 	go func() {
@@ -217,6 +229,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		s.running = false
 		s.cancelTurn = nil
 		s.lastResult = res
+		s.completedTurn = turn
 		switch {
 		case err == nil:
 			s.lastErr = ""

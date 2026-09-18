@@ -39,6 +39,7 @@ export interface SessionInfo {
   running: boolean;
   last_error?: string;
   turn?: {
+    id?: number;
     final?: string;
     steps?: number;
     tool_calls?: number;

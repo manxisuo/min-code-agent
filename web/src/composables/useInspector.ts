@@ -87,9 +87,14 @@ export function useInspector() {
   let streamMsgId: string | null = null;
   let streamFlush: number | null = null;
   let streamPending = "";
+  /** Last session turn.id whose final answer was written into the chat. */
+  let lastFinalTurnId = -1;
+  /** Text of the last assistant bubble written for final/stream sync. */
+  let lastAssistantText = "";
 
   function addMessage(role: ChatMessage["role"], text: string) {
     messages.value.push({ id: msgId(), role, text });
+    if (role === "assistant") lastAssistantText = text;
   }
 
   function addSystemOnce(text: string) {
@@ -107,20 +112,39 @@ export function useInspector() {
     }
   }
 
-  function appendAssistantOnce(final: string) {
+  /**
+   * Insert or refine the assistant answer once per completed turn.
+   * Never runs while a turn is in flight (stale finals must not reappear).
+   */
+  function appendAssistantOnce(final: string, turnId?: number) {
     if (!final) return;
+    const fin = final.trim();
+    if (!fin) return;
+    const tid = turnId ?? 0;
+    if (tid && tid === lastFinalTurnId && fin === lastAssistantText) return;
+
     const last = [...messages.value].reverse().find((m) => m.role === "assistant");
     if (last) {
       const lastText = last.text.trim();
-      const fin = final.trim();
-      if (lastText === fin) return;
-      if (fin.startsWith(lastText.slice(0, Math.min(40, lastText.length))) && fin.length >= lastText.length) {
-        last.text = fin;
+      if (lastText === fin) {
+        lastAssistantText = fin;
+        if (tid) lastFinalTurnId = tid;
         return;
       }
-      if (lastText.includes(fin.slice(0, Math.min(40, fin.length)))) return;
+      // Streamed prefix → replace with full final.
+      if (fin.startsWith(lastText) || lastText.startsWith(fin.slice(0, Math.min(40, fin.length)))) {
+        last.text = fin;
+        lastAssistantText = fin;
+        if (tid) lastFinalTurnId = tid;
+        return;
+      }
+      if (lastText.includes(fin.slice(0, Math.min(40, fin.length)))) {
+        if (tid) lastFinalTurnId = tid;
+        return;
+      }
     }
-    addMessage("assistant", final);
+    addMessage("assistant", fin);
+    if (tid) lastFinalTurnId = tid;
   }
 
   function flushStreamDelta() {
@@ -131,9 +155,13 @@ export function useInspector() {
       const id = msgId();
       streamMsgId = id;
       messages.value.push({ id, role: "assistant", text: piece });
+      lastAssistantText = piece;
     } else {
       const m = messages.value.find((x) => x.id === streamMsgId);
-      if (m) m.text += piece;
+      if (m) {
+        m.text += piece;
+        lastAssistantText = m.text;
+      }
     }
   }
 
@@ -148,7 +176,10 @@ export function useInspector() {
   function applySession(s: SessionInfo) {
     session.value = s;
     if (s.snapshot) snapshot.value = s.snapshot;
-    if (s.turn?.final) appendAssistantOnce(s.turn.final);
+    // Only sync chat text when idle; mid-run finals are stale by design.
+    if (!s.running && s.turn?.final) {
+      appendAssistantOnce(s.turn.final, s.turn.id);
+    }
     if (s.last_error) addSystemOnce("error: " + s.last_error);
     if (!s.running) clearPollTimer();
   }
@@ -256,6 +287,13 @@ export function useInspector() {
     if (!message) return;
     lastErrorShown.value = "";
     input.value = "";
+    // New turn: reset stream buffers so the next answer gets a fresh bubble.
+    streamMsgId = null;
+    streamPending = "";
+    if (streamFlush != null) {
+      window.clearTimeout(streamFlush);
+      streamFlush = null;
+    }
     addMessage("user", message);
     await apiChat(message);
     session.value = {
@@ -266,9 +304,11 @@ export function useInspector() {
         model: "",
         state: "BUILDING_CONTEXT",
         running: true,
+        turn: { final: "" },
       }),
       state: "BUILDING_CONTEXT",
       running: true,
+      turn: { ...(session.value?.turn || {}), final: "" },
     };
     clearPollTimer();
     pollTimer = window.setInterval(() => {
