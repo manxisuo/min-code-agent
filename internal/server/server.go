@@ -24,8 +24,10 @@ type Options struct {
 	SessionID string
 	Provider  string
 	Model     string
-	// TraceDir is where session JSONL traces are written (default <workspace>/.mincode/traces).
+	// TraceDir is the primary directory for session JSONL traces.
 	TraceDir string
+	// TraceDirExtra is an optional legacy directory merged when listing/reading traces.
+	TraceDirExtra string
 }
 
 // Server exposes Agent runtime over HTTP + SSE for the local Web UI.
@@ -48,8 +50,8 @@ type Server struct {
 	// turnSeq increments on each /api/chat; completedTurn is the turn
 	// whose result is in lastResult. Prevents stale finals from being
 	// re-served as the "current" answer while a new turn runs.
-	turnSeq        int
-	completedTurn  int
+	turnSeq       int
+	completedTurn int
 }
 
 // New wires an agent + bus into an HTTP server. Subscribe on the bus so all

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/manxisuo/mincode/internal/paths"
 	"github.com/manxisuo/mincode/internal/replay"
 )
 
@@ -94,12 +95,14 @@ func (a *App) resolveTracePath(ref string) (string, error) {
 			return ref, nil
 		}
 	}
-	// Session id → trace under configured trace dir, then workspace .mincode
-	candidates := []string{
-		filepath.Join(a.cfg.Trace.Dir, ref+".jsonl"),
-		filepath.Join(a.workspace, ".mincode", "traces", ref+".jsonl"),
-		filepath.Join(".mincode", "traces", ref+".jsonl"),
+	layout := paths.Resolve(a.workspace, a.cfg.Data.Location, a.cfg.Data.Root)
+	candidates := []string{}
+	for _, dir := range layout.TraceSearchDirs() {
+		candidates = append(candidates, filepath.Join(dir, ref+".jsonl"))
 	}
+	candidates = append(candidates,
+		filepath.Join(".mincode", "traces", ref+".jsonl"),
+	)
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
 			return c, nil

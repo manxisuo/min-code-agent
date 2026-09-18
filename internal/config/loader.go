@@ -77,6 +77,12 @@ func applyEnv(cfg *Config) {
 			cfg.Provider.MaxTokens = n
 		}
 	}
+	if v := os.Getenv("MINCODE_DATA_LOCATION"); v != "" {
+		cfg.Data.Location = v
+	}
+	if v := os.Getenv("MINCODE_DATA_ROOT"); v != "" {
+		cfg.Data.Root = v
+	}
 }
 
 func firstEnv(keys ...string) string {
@@ -127,6 +133,12 @@ func normalize(cfg *Config) {
 	}
 	if cfg.Trace.Dir == "" {
 		cfg.Trace.Dir = ".mincode/traces"
+	}
+	if cfg.Data.Location == "" {
+		cfg.Data.Location = "global"
+	}
+	if cfg.Data.Location != "global" && cfg.Data.Location != "workspace" {
+		cfg.Data.Location = "global"
 	}
 }
 

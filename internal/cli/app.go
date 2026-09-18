@@ -26,6 +26,7 @@ import (
 	"github.com/manxisuo/mincode/internal/llm"
 	"github.com/manxisuo/mincode/internal/memory"
 	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/paths"
 	"github.com/manxisuo/mincode/internal/plan"
 	"github.com/manxisuo/mincode/internal/session"
 	"github.com/manxisuo/mincode/internal/skill"
@@ -99,16 +100,17 @@ func NewApp(opts Options) (*App, error) {
 	}
 
 	sessionID := time.Now().UTC().Format("20060102-150405") + "-" + observability.NewID()[:8]
-	traceDir := cfg.Trace.Dir
-	if traceDir == "" {
-		traceDir = ".mincode/traces"
-	}
-	// Traces always live under the workspace so CLI and `mincode web` agree.
-	if !filepath.IsAbs(traceDir) {
-		traceDir = filepath.Join(workspace, traceDir)
-	}
-	if err := config.EnsureTraceDir(traceDir); err != nil {
+	layout := paths.Resolve(workspace, cfg.Data.Location, cfg.Data.Root)
+	if err := layout.EnsureDirs(); err != nil {
 		return nil, err
+	}
+	traceDir := layout.TracesDir
+	// Absolute MINCODE_TRACE_DIR / trace.dir still wins as an explicit override.
+	if cfg.Trace.Dir != "" && filepath.IsAbs(cfg.Trace.Dir) {
+		traceDir = cfg.Trace.Dir
+		if err := config.EnsureTraceDir(traceDir); err != nil {
+			return nil, err
+		}
 	}
 	tracePath := config.TracePath(traceDir, sessionID)
 	recorder, err := observability.NewRecorder(tracePath)
@@ -170,7 +172,7 @@ func NewApp(opts Options) (*App, error) {
 		fmt.Fprintf(os.Stderr, "mincode: discover skills: %v\n", err)
 	}
 
-	sessions := session.NewStore(session.DefaultDir(workspace))
+	sessions := session.NewStore(layout.SessionsDir)
 
 	app := &App{
 		cfg:       cfg,

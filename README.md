@@ -159,6 +159,15 @@ npm run build    # 产出 dist/，随后 go build 使用 embed
 
 后续计划含 **LLM 流式输出**（边生成边展示、取消更早中断），详见 `roadmap.md`。
 
+Sessions / traces / experiments 默认写在：
+
+```text
+{user_home}/.mincode/projects/{project-id}/
+  project-id = {目录名}-{SHA256(绝对路径)前8位}
+```
+
+可用 `data.location: workspace` 改回项目内 `.mincode/`；旧目录仍可读。详见 `mincode.example.yaml`。
+
 实验对比：
 
 ```bash

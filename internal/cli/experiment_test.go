@@ -11,7 +11,7 @@ import (
 func TestExperimentRunListCompare(t *testing.T) {
 	ws := t.TempDir()
 	cfg := filepath.Join(ws, "mincode.yaml")
-	yaml := "provider:\n  type: fake\n  model: fake-model\n"
+	yaml := "provider:\n  type: fake\n  model: fake-model\ndata:\n  location: workspace\n"
 	if err := os.WriteFile(cfg, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}

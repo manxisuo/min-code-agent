@@ -6,6 +6,7 @@ type Config struct {
 	Agent    AgentConfig    `yaml:"agent"`
 	Memory   MemoryConfig   `yaml:"memory"`
 	Trace    TraceConfig    `yaml:"trace"`
+	Data     DataConfig     `yaml:"data"`
 }
 
 // ProviderConfig selects and configures an LLM provider.
@@ -49,6 +50,16 @@ type MemoryConfig struct {
 	AutoExtract bool `yaml:"auto_extract"`
 }
 
+// DataConfig controls where runtime data (traces/sessions/experiments) is stored.
+type DataConfig struct {
+	// Location is "global" (default) or "workspace".
+	// global: {home}/.mincode/projects/{slug}-{hash8}/...
+	// workspace: {workspace}/.mincode/...
+	Location string `yaml:"location"`
+	// Root overrides the global data root (default {home}/.mincode).
+	Root string `yaml:"root"`
+}
+
 // Default returns a sensible default configuration.
 func Default() Config {
 	on := true
@@ -68,6 +79,9 @@ func Default() Config {
 			CompressAt:    18000,
 			ParallelTools: &on,
 			MaxParallel:   4,
+		},
+		Data: DataConfig{
+			Location: "global",
 		},
 		Trace: TraceConfig{
 			Dir: ".mincode/traces",

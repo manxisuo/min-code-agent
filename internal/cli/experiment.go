@@ -10,7 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/manxisuo/mincode/internal/config"
 	"github.com/manxisuo/mincode/internal/experiment"
+	"github.com/manxisuo/mincode/internal/paths"
 )
 
 // RunExperimentCLI dispatches `mincode experiment ...` subcommands.
@@ -54,8 +56,25 @@ Run flags:
   --workspace   workspace directory (default: cwd)
   --config      mincode.yaml path
 
-Results: <workspace>/.mincode/experiments/<name>/<run-id>.json
+Results:
+  global (default): {home}/.mincode/projects/{project-id}/experiments/
+  workspace:        {workspace}/.mincode/experiments/
+  (legacy workspace dirs are still readable)
 `
+
+// experimentLayout resolves data dirs using workspace config + defaults.
+func experimentLayout(workspace, configPath string) paths.Layout {
+	cfg, err := config.LoadFrom(configPath, workspace)
+	if err != nil {
+		return paths.Resolve(workspace, paths.LocationGlobal, "")
+	}
+	return paths.Resolve(workspace, cfg.Data.Location, cfg.Data.Root)
+}
+
+func openExperimentStore(workspace, configPath string) (*experiment.Store, error) {
+	l := experimentLayout(workspace, configPath)
+	return experiment.NewStoreFromRoots(l.ExperimentSearchDirs()...)
+}
 
 func experimentRun(argv []string, out io.Writer) int {
 	fs := flag.NewFlagSet("experiment run", flag.ContinueOnError)
@@ -92,7 +111,7 @@ func experimentRun(argv []string, out io.Writer) int {
 	}
 	spec.Workspace = workspace
 
-	store, err := experiment.NewStore(workspace)
+	store, err := openExperimentStore(workspace, configPath)
 	if err != nil {
 		fmt.Fprintf(out, "error: %v\n", err)
 		return 1
@@ -192,7 +211,8 @@ func executeExperimentRun(ctx context.Context, workspace, configPath string, spe
 
 func experimentList(argv []string, out io.Writer) int {
 	workspace := workspaceFromArgs(argv)
-	store, err := experiment.NewStore(workspace)
+	cfgPath := configPathFromArgs(argv)
+	store, err := openExperimentStore(workspace, cfgPath)
 	if err != nil {
 		fmt.Fprintf(out, "error: %v\n", err)
 		return 1
@@ -213,7 +233,7 @@ func experimentShow(argv []string, out io.Writer) int {
 	}
 	name := argv[0]
 	workspace := workspaceFromArgs(argv[1:])
-	store, err := experiment.NewStore(workspace)
+	store, err := openExperimentStore(workspace, configPathFromArgs(argv[1:]))
 	if err != nil {
 		fmt.Fprintf(out, "error: %v\n", err)
 		return 1
@@ -234,7 +254,7 @@ func experimentCompare(argv []string, out io.Writer) int {
 	}
 	nameA, nameB := argv[0], argv[1]
 	workspace := workspaceFromArgs(argv[2:])
-	store, err := experiment.NewStore(workspace)
+	store, err := openExperimentStore(workspace, configPathFromArgs(argv[2:]))
 	if err != nil {
 		fmt.Fprintf(out, "error: %v\n", err)
 		return 1
@@ -248,21 +268,42 @@ func experimentCompare(argv []string, out io.Writer) int {
 	return 0
 }
 
-// workspaceFromArgs extracts --workspace DIR (or -workspace) from leftover args.
-func workspaceFromArgs(args []string) string {
-	for i := 0; i < len(args); i++ {
-		a := args[i]
+func workspaceFromArgs(argv []string) string {
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
 		if a == "--workspace" || a == "-workspace" {
-			if i+1 < len(args) {
-				return args[i+1]
+			if i+1 < len(argv) && argv[i+1] != "" {
+				if abs, err := filepath.Abs(argv[i+1]); err == nil {
+					return abs
+				}
+				return argv[i+1]
 			}
 		}
 		if strings.HasPrefix(a, "--workspace=") {
-			return strings.TrimPrefix(a, "--workspace=")
+			p := strings.TrimPrefix(a, "--workspace=")
+			if abs, err := filepath.Abs(p); err == nil {
+				return abs
+			}
+			return p
 		}
 	}
 	if wd, err := os.Getwd(); err == nil {
 		return wd
 	}
 	return "."
+}
+
+func configPathFromArgs(argv []string) string {
+	for i := 0; i < len(argv); i++ {
+		a := argv[i]
+		if a == "--config" || a == "-config" {
+			if i+1 < len(argv) && argv[i+1] != "" {
+				return argv[i+1]
+			}
+		}
+		if strings.HasPrefix(a, "--config=") {
+			return strings.TrimPrefix(a, "--config=")
+		}
+	}
+	return ""
 }

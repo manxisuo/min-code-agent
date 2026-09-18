@@ -101,10 +101,12 @@ Config resolution (when -config is omitted):
   <workspace>/mincode.yaml → <workspace>/mincode.yml → ./mincode.yaml
 
 Sessions:
-  Saved to <workspace>/.mincode/sessions/<id>.json after each turn
+  Default (global): {home}/.mincode/projects/<project-id>/sessions/
+  Or workspace mode: <workspace>/.mincode/sessions/  (data.location: workspace)
 
 Experiments:
-  Results in <workspace>/.mincode/experiments/<name>/
+  Default (global): {home}/.mincode/projects/<project-id>/experiments/
+  Or workspace mode: <workspace>/.mincode/experiments/
 
 REPL commands:
   /help  /timeline  /context  /trace [n]  /metrics  /export  /exit

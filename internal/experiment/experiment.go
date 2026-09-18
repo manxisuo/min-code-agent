@@ -82,12 +82,13 @@ type Aggregate struct {
 	DurationMSStat Stat `json:"duration_ms_stat"`
 }
 
-// Store persists results under <workspace>/.mincode/experiments/<name>/.
+// Store persists results under one or more experiment roots.
+// Primary root is roots[0]; additional roots are read for list/load compatibility.
 type Store struct {
-	root string // .../.mincode/experiments
+	roots []string
 }
 
-// NewStore creates a store under workspace/.mincode/experiments.
+// NewStore creates a store under workspace/.mincode/experiments (legacy/test helper).
 func NewStore(workspace string) (*Store, error) {
 	if workspace == "" {
 		workspace = "."
@@ -96,11 +97,47 @@ func NewStore(workspace string) (*Store, error) {
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, err
 	}
-	return &Store{root: root}, nil
+	return &Store{roots: []string{root}}, nil
 }
 
-// Root returns the experiments directory.
-func (s *Store) Root() string { return s.root }
+// NewStoreFromRoots creates a store; roots[0] is writable primary.
+func NewStoreFromRoots(roots ...string) (*Store, error) {
+	if len(roots) == 0 {
+		return nil, fmt.Errorf("experiment: no roots")
+	}
+	if err := os.MkdirAll(roots[0], 0o755); err != nil {
+		return nil, err
+	}
+	clean := make([]string, 0, len(roots))
+	seen := map[string]bool{}
+	for _, r := range roots {
+		if r == "" {
+			continue
+		}
+		key := filepath.Clean(r)
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		clean = append(clean, r)
+	}
+	return &Store{roots: clean}, nil
+}
+
+// Root returns the primary experiments directory.
+func (s *Store) Root() string {
+	if len(s.roots) == 0 {
+		return ""
+	}
+	return s.roots[0]
+}
+
+// Roots returns all experiment directories (primary first).
+func (s *Store) Roots() []string {
+	out := make([]string, len(s.roots))
+	copy(out, s.roots)
+	return out
+}
 
 // Save writes one run result as JSON. Overwrites if RunID collides.
 func (s *Store) Save(r RunResult) error {
@@ -110,7 +147,7 @@ func (s *Store) Save(r RunResult) error {
 	if r.RunID == "" {
 		r.RunID = time.Now().UTC().Format("20060102-150405.000")
 	}
-	dir := filepath.Join(s.root, r.Experiment)
+	dir := filepath.Join(s.Root(), r.Experiment)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
@@ -121,52 +158,63 @@ func (s *Store) Save(r RunResult) error {
 	return os.WriteFile(filepath.Join(dir, r.RunID+".json"), data, 0o644)
 }
 
-// LoadExperiment returns all runs for a name, sorted by RunID.
+// LoadExperiment returns all runs for a name across roots, sorted by RunID.
 func (s *Store) LoadExperiment(name string) ([]RunResult, error) {
-	dir := filepath.Join(s.root, name)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("experiment %q not found", name)
-		}
-		return nil, err
-	}
 	var out []RunResult
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+	found := false
+	for _, root := range s.roots {
+		dir := filepath.Join(root, name)
+		entries, err := os.ReadDir(dir)
 		if err != nil {
-			continue
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		var r RunResult
-		if err := json.Unmarshal(data, &r); err != nil {
-			continue
+		found = true
+		for _, e := range entries {
+			if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+			if err != nil {
+				continue
+			}
+			var r RunResult
+			if err := json.Unmarshal(data, &r); err != nil {
+				continue
+			}
+			out = append(out, r)
 		}
-		out = append(out, r)
+	}
+	if !found {
+		return nil, fmt.Errorf("experiment %q not found", name)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].RunID < out[j].RunID })
 	return out, nil
 }
 
-// List names all experiments that have at least one run file.
+// List names all experiments that have at least one run file (merged across roots).
 func (s *Store) List() ([]string, error) {
-	entries, err := os.ReadDir(s.root)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
+	seen := map[string]bool{}
 	var names []string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
+	for _, root := range s.roots {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
 		}
-		runs, err := s.LoadExperiment(e.Name())
-		if err == nil && len(runs) > 0 {
-			names = append(names, e.Name())
+		for _, e := range entries {
+			if !e.IsDir() || seen[e.Name()] {
+				continue
+			}
+			runs, err := s.LoadExperiment(e.Name())
+			if err == nil && len(runs) > 0 {
+				seen[e.Name()] = true
+				names = append(names, e.Name())
+			}
 		}
 	}
 	sort.Strings(names)

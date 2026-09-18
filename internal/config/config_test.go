@@ -17,6 +17,9 @@ func TestDefault(t *testing.T) {
 	if cfg.Agent.MaxSteps != 30 {
 		t.Fatalf("max steps = %d", cfg.Agent.MaxSteps)
 	}
+	if cfg.Data.Location != "global" {
+		t.Fatalf("data.location = %q", cfg.Data.Location)
+	}
 }
 
 func TestLoadMissingExplicitPath(t *testing.T) {

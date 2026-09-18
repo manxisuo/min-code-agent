@@ -14,6 +14,7 @@ import (
 	"github.com/manxisuo/mincode/internal/instruction"
 	"github.com/manxisuo/mincode/internal/memory"
 	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/paths"
 	"github.com/manxisuo/mincode/internal/permission"
 	"github.com/manxisuo/mincode/internal/server"
 	"github.com/manxisuo/mincode/internal/skill"
@@ -69,12 +70,16 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 	}
 
 	sessionID := time.Now().UTC().Format("20060102-150405") + "-" + observability.NewID()[:8]
-	traceDir := cfg.Trace.Dir
-	if traceDir != "" && !filepath.IsAbs(traceDir) {
-		traceDir = filepath.Join(workspace, traceDir)
-	}
-	if err := config.EnsureTraceDir(traceDir); err != nil {
+	layout := paths.Resolve(workspace, cfg.Data.Location, cfg.Data.Root)
+	if err := layout.EnsureDirs(); err != nil {
 		return err
+	}
+	traceDir := layout.TracesDir
+	if cfg.Trace.Dir != "" && filepath.IsAbs(cfg.Trace.Dir) {
+		traceDir = cfg.Trace.Dir
+		if err := config.EnsureTraceDir(traceDir); err != nil {
+			return err
+		}
 	}
 	tracePath := config.TracePath(traceDir, sessionID)
 	recorder, err := observability.NewRecorder(tracePath)
@@ -150,19 +155,20 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		addr = "127.0.0.1:8080"
 	}
 
-	expStore, expErr := experiment.NewStore(workspace)
+	expStore, expErr := experiment.NewStoreFromRoots(layout.ExperimentSearchDirs()...)
 	if expErr != nil {
 		fmt.Fprintf(os.Stderr, "mincode web: experiment store: %v\n", expErr)
 		expStore = nil
 	}
 
 	srv := server.New(server.Options{
-		Addr:      addr,
-		Workspace: workspace,
-		SessionID: sessionID,
-		Provider:  provider.Name(),
-		Model:     provider.Model(),
-		TraceDir:  traceDir,
+		Addr:          addr,
+		Workspace:     workspace,
+		SessionID:     sessionID,
+		Provider:      provider.Name(),
+		Model:         provider.Model(),
+		TraceDir:      traceDir,
+		TraceDirExtra: layout.LegacyTraces,
 	}, ag, bus, metrics, expStore)
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,
