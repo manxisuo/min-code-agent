@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ChatMessage } from "../types";
+import MdText from "./MdText.vue";
 
 const props = defineProps<{
   messages: ChatMessage[];
@@ -21,18 +22,18 @@ function onSubmit() {
   <section class="panel chat">
     <div class="panel-head">
       <h2>Conversation</h2>
-      <span class="hint">Local Web · Vue</span>
+      <span class="hint">Local Web · Markdown</span>
     </div>
     <div class="messages" aria-live="polite">
       <div v-for="m in messages" :key="m.id" class="msg" :class="m.role">
         <div class="role">{{ m.role }}</div>
-        <div class="body">{{ m.text }}</div>
+        <MdText :content="m.text" :plain="m.role === 'system'" />
       </div>
     </div>
     <form class="composer" @submit.prevent="onSubmit">
       <textarea
         rows="3"
-        placeholder="输入消息，例如：分析这个项目的入口和架构。"
+        placeholder="输入消息（支持 Markdown），例如：**分析**这个项目的入口。"
         :value="input"
         :disabled="disabled"
         @input="emit('update:input', ($event.target as HTMLTextAreaElement).value)"
