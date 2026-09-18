@@ -58,7 +58,7 @@ func TestWebAPIChatAndEvents(t *testing.T) {
 		SessionID: "web-test",
 		Provider:  "fake",
 		Model:     "fake-model",
-	}, ag, bus, metrics)
+	}, ag, bus, metrics, nil)
 
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
@@ -196,7 +196,7 @@ func TestWebChatConflictWhileRunning(t *testing.T) {
 	}
 	ag.Provider = fake
 
-	srv := New(Options{SessionID: "c"}, ag, bus, metrics)
+	srv := New(Options{SessionID: "c"}, ag, bus, metrics, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

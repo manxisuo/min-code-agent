@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/manxisuo/mincode/internal/agent"
+	"github.com/manxisuo/mincode/internal/experiment"
 	"github.com/manxisuo/mincode/internal/observability"
 	webui "github.com/manxisuo/mincode/web"
 )
@@ -26,10 +27,11 @@ type Options struct {
 
 // Server exposes Agent runtime over HTTP + SSE for the local Web UI.
 type Server struct {
-	opts    Options
-	agent   *agent.Agent
-	bus     *observability.Bus
-	metrics *observability.MetricsCollector
+	opts        Options
+	agent       *agent.Agent
+	bus         *observability.Bus
+	metrics     *observability.MetricsCollector
+	experiments *experiment.Store
 
 	hub *eventHub
 
@@ -43,16 +45,18 @@ type Server struct {
 
 // New wires an agent + bus into an HTTP server. Subscribe on the bus so all
 // runtime events fan out to SSE clients without touching the agent loop.
-func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector) *Server {
+// exp may be nil when experiment APIs should report empty lists.
+func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store) *Server {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:8080"
 	}
 	s := &Server{
-		opts:    opts,
-		agent:   ag,
-		bus:     bus,
-		metrics: metrics,
-		hub:     newEventHub(),
+		opts:        opts,
+		agent:       ag,
+		bus:         bus,
+		metrics:     metrics,
+		experiments: exp,
+		hub:         newEventHub(),
 	}
 	if bus != nil {
 		bus.Subscribe(func(e observability.Event) {
@@ -74,6 +78,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/context", s.handleContext)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/timeline", s.handleTimeline)
+	mux.HandleFunc("GET /api/experiments", s.handleExperimentList)
+	mux.HandleFunc("GET /api/experiments/{name}", s.handleExperimentShow)
 
 	static, err := fs.Sub(webui.FS, "dist")
 	if err == nil {

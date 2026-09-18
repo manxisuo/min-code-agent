@@ -10,6 +10,7 @@ import (
 
 	"github.com/manxisuo/mincode/internal/agent"
 	"github.com/manxisuo/mincode/internal/config"
+	"github.com/manxisuo/mincode/internal/experiment"
 	"github.com/manxisuo/mincode/internal/instruction"
 	"github.com/manxisuo/mincode/internal/memory"
 	"github.com/manxisuo/mincode/internal/observability"
@@ -145,13 +146,19 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		addr = "127.0.0.1:8080"
 	}
 
+	expStore, expErr := experiment.NewStore(workspace)
+	if expErr != nil {
+		fmt.Fprintf(os.Stderr, "mincode web: experiment store: %v\n", expErr)
+		expStore = nil
+	}
+
 	srv := server.New(server.Options{
 		Addr:      addr,
 		Workspace: workspace,
 		SessionID: sessionID,
 		Provider:  provider.Name(),
 		Model:     provider.Model(),
-	}, ag, bus, metrics)
+	}, ag, bus, metrics, expStore)
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,
 		observability.SessionCreatedData{

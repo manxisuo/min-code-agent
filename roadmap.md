@@ -490,10 +490,21 @@ Ask 级写操作自动批准（危险 shell 仍拒绝）
 ### 后续可选
 
 ```text
-网页 Permission 审批
-Experiment Dashboard
+网页 Permission 审批          ← 暂缓
+Experiment Dashboard          ✅ W2 已实现（列表 / 分布 / runs）
 Timeline 图形化（并行 batch 分叉）
-LLM 流式输出写入聊天区（见「计划：LLM Streaming Output」）
+LLM 流式输出写入聊天区        ✅ 已实现
+```
+
+---
+
+## W2：Experiment Dashboard（已实现）
+
+```text
+GET /api/experiments           列表 + Aggregate（含 min/median/max）
+GET /api/experiments/{name}    详情 + runs
+Web: Inspector | Experiments 页签
+     左列表 med duration 条；右分布表 + run 明细
 ```
 
 ---
