@@ -14,6 +14,7 @@ import (
 	"github.com/manxisuo/mincode/internal/agent"
 	"github.com/manxisuo/mincode/internal/experiment"
 	"github.com/manxisuo/mincode/internal/observability"
+	"github.com/manxisuo/mincode/internal/plan"
 	webui "github.com/manxisuo/mincode/web"
 )
 
@@ -36,6 +37,8 @@ type Server struct {
 	metrics     *observability.MetricsCollector
 	experiments *experiment.Store
 	traceDir    string
+	plans       *plan.Manager
+	planMu      sync.Mutex
 
 	hub *eventHub
 
@@ -73,6 +76,7 @@ func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observa
 		metrics:     metrics,
 		experiments: exp,
 		traceDir:    traceDir,
+		plans:       plan.NewManager(),
 		hub:         newEventHub(),
 	}
 	if bus != nil {
@@ -99,6 +103,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/traces/{id}", s.handleTraceShow)
 	mux.HandleFunc("GET /api/experiments", s.handleExperimentList)
 	mux.HandleFunc("GET /api/experiments/{name}", s.handleExperimentShow)
+	mux.HandleFunc("GET /api/plan", s.handlePlanGet)
+	mux.HandleFunc("POST /api/plan", s.handlePlanDraft)
+	mux.HandleFunc("POST /api/plan/approve", s.handlePlanApprove)
+	mux.HandleFunc("POST /api/plan/reject", s.handlePlanReject)
+	mux.HandleFunc("POST /api/plan/cancel", s.handlePlanCancel)
 
 	static, err := fs.Sub(webui.FS, "dist")
 	if err == nil {

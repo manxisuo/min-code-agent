@@ -58,6 +58,34 @@ export interface MetricsInfo {
   parallel_tool_calls?: number;
 }
 
+export type PlanStatus =
+  | "draft"
+  | "approved"
+  | "rejected"
+  | "running"
+  | "done"
+  | "failed"
+  | "cancelled"
+  | "pending"
+  | "skipped";
+
+export interface PlanStep {
+  index: number;
+  title: string;
+  status: PlanStatus;
+  result?: string;
+  error?: string;
+}
+
+export interface Plan {
+  id: string;
+  goal: string;
+  steps: PlanStep[];
+  status: PlanStatus;
+  created_at?: string;
+  current?: number;
+}
+
 export interface ChatMessage {
   id: string;
   role: "user" | "assistant" | "system";

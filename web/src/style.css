@@ -696,6 +696,74 @@ button.linkish:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.plan-panel {
+  overflow: auto;
+  padding-bottom: 16px;
+}
+.plan-compose {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.plan-goal { min-width: 0; }
+.plan-empty { margin: 8px 14px; }
+.plan-body { padding: 0 14px 12px; }
+.plan-meta { margin-bottom: 10px; }
+.plan-goal-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.plan-status { font-family: var(--mono); font-size: 11px; }
+.plan-status[data-status="draft"] { color: var(--warn); border-color: var(--warn); }
+.plan-status[data-status="running"] { color: var(--accent); border-color: var(--accent); }
+.plan-status[data-status="done"] { color: var(--ok); border-color: var(--ok); }
+.plan-status[data-status="failed"],
+.plan-status[data-status="rejected"],
+.plan-status[data-status="cancelled"] { color: var(--err); border-color: var(--err); }
+.plan-goal-text { margin-bottom: 4px; }
+.plan-progress {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+}
+.plan-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.plan-steps {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+}
+.plan-step {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.plan-step[data-status="running"] { color: var(--accent); }
+.plan-step[data-status="done"] { color: var(--ok); }
+.plan-step[data-status="failed"] { color: var(--err); }
+.plan-step[data-status="cancelled"] { color: var(--warn); }
+.step-note {
+  color: var(--muted);
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+.step-err {
+  color: var(--err);
+  margin-top: 2px;
+}
+
 @media (max-width: 960px) {
   .layout { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: repeat(3, 1fr); }

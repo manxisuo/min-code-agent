@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import ExperimentPanel from "./components/ExperimentPanel.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
+import PlanPanel from "./components/PlanPanel.vue";
 import { useInspector } from "./composables/useInspector";
 import { useTheme } from "./theme";
 
@@ -23,7 +24,7 @@ const {
   fmtTime,
 } = useInspector();
 
-const view = ref<"inspector" | "experiments">("inspector");
+const view = ref<"inspector" | "experiments" | "plan">("inspector");
 
 const stateLabel = computed(() => session.value?.state || "IDLE");
 const running = computed(() => !!session.value?.running);
@@ -64,6 +65,13 @@ function onSend() {
           </button>
           <button
             type="button"
+            :class="{ active: view === 'plan' }"
+            @click="view = 'plan'"
+          >
+            Plan
+          </button>
+          <button
+            type="button"
             :class="{ active: view === 'experiments' }"
             @click="view = 'experiments'"
           >
@@ -78,7 +86,10 @@ function onSend() {
       </div>
     </header>
 
-    <main class="layout" :class="{ 'layout-full': view === 'experiments' }">
+    <main
+      class="layout"
+      :class="{ 'layout-full': view === 'experiments' || view === 'plan' }"
+    >
       <template v-if="view === 'inspector'">
         <ChatPanel
           :messages="messages"
@@ -97,6 +108,7 @@ function onSend() {
           :preview-data="previewData"
         />
       </template>
+      <PlanPanel v-else-if="view === 'plan'" />
       <ExperimentPanel v-else />
     </main>
   </div>
