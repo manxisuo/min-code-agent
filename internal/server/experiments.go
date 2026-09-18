@@ -25,8 +25,8 @@ func (s *Server) handleExperimentList(w http.ResponseWriter, _ *http.Request) {
 		list = append(list, experiment.Summarize(n, runs))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"root":         s.experiments.Root(),
-		"experiments":  list,
+		"root":        s.experiments.Root(),
+		"experiments": list,
 	})
 }
 

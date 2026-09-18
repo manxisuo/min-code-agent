@@ -494,6 +494,19 @@ Ask 级写操作自动批准（危险 shell 仍拒绝）
 Experiment Dashboard          ✅ W2 已实现（列表 / 分布 / runs）
 Timeline 图形化（并行 batch 分叉）
 LLM 流式输出写入聊天区        ✅ 已实现
+Trace Explorer                ✅ 并入 Timeline History（方案 1）
+```
+
+---
+
+## Timeline History（方案 1）
+
+```text
+GET /api/traces           列出 <traceDir>/*.jsonl
+GET /api/traces/{id}      读 JSONL；?type=前缀过滤 &limit=
+Web Timeline: Live | History
+  History: 下拉选 session、type 过滤、可选原始 JSON
+  与 Live 共用同一列表渲染，避免第二套事件产品
 ```
 
 ---

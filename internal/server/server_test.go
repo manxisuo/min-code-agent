@@ -60,6 +60,20 @@ func TestWebAPIChatAndEvents(t *testing.T) {
 		Model:     "fake-model",
 	}, ag, bus, metrics, nil)
 
+	// Trace history API
+	tr := httptest.NewServer(srv.Handler())
+	defer tr.Close()
+	res2, err := http.Get(tr.URL + "/api/traces")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tl map[string]any
+	_ = json.NewDecoder(res2.Body).Decode(&tl)
+	res2.Body.Close()
+	if _, ok := tl["traces"]; !ok {
+		t.Fatalf("traces list = %+v", tl)
+	}
+
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 

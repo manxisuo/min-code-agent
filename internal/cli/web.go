@@ -69,10 +69,14 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 	}
 
 	sessionID := time.Now().UTC().Format("20060102-150405") + "-" + observability.NewID()[:8]
-	if err := config.EnsureTraceDir(cfg.Trace.Dir); err != nil {
+	traceDir := cfg.Trace.Dir
+	if traceDir != "" && !filepath.IsAbs(traceDir) {
+		traceDir = filepath.Join(workspace, traceDir)
+	}
+	if err := config.EnsureTraceDir(traceDir); err != nil {
 		return err
 	}
-	tracePath := config.TracePath(cfg.Trace.Dir, sessionID)
+	tracePath := config.TracePath(traceDir, sessionID)
 	recorder, err := observability.NewRecorder(tracePath)
 	if err != nil {
 		return err
@@ -158,6 +162,7 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		SessionID: sessionID,
 		Provider:  provider.Name(),
 		Model:     provider.Model(),
+		TraceDir:  traceDir,
 	}, ag, bus, metrics, expStore)
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,

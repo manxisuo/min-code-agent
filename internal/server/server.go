@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -23,6 +24,8 @@ type Options struct {
 	SessionID string
 	Provider  string
 	Model     string
+	// TraceDir is where session JSONL traces are written (default <workspace>/.mincode/traces).
+	TraceDir string
 }
 
 // Server exposes Agent runtime over HTTP + SSE for the local Web UI.
@@ -32,6 +35,7 @@ type Server struct {
 	bus         *observability.Bus
 	metrics     *observability.MetricsCollector
 	experiments *experiment.Store
+	traceDir    string
 
 	hub *eventHub
 
@@ -50,12 +54,20 @@ func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observa
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:8080"
 	}
+	traceDir := opts.TraceDir
+	if traceDir == "" && opts.Workspace != "" {
+		traceDir = filepath.Join(opts.Workspace, ".mincode", "traces")
+	}
+	if traceDir == "" {
+		traceDir = ".mincode/traces"
+	}
 	s := &Server{
 		opts:        opts,
 		agent:       ag,
 		bus:         bus,
 		metrics:     metrics,
 		experiments: exp,
+		traceDir:    traceDir,
 		hub:         newEventHub(),
 	}
 	if bus != nil {
@@ -78,6 +90,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/context", s.handleContext)
 	mux.HandleFunc("GET /api/metrics", s.handleMetrics)
 	mux.HandleFunc("GET /api/timeline", s.handleTimeline)
+	mux.HandleFunc("GET /api/traces", s.handleTraceList)
+	mux.HandleFunc("GET /api/traces/{id}", s.handleTraceShow)
 	mux.HandleFunc("GET /api/experiments", s.handleExperimentList)
 	mux.HandleFunc("GET /api/experiments/{name}", s.handleExperimentShow)
 

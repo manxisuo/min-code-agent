@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { apiTrace, apiTraces, type TraceListItem } from "../traceApi";
 import type { ContextItem, ContextSnapshot, MetricsInfo, RuntimeEvent } from "../types";
 
 const props = defineProps<{
@@ -116,6 +117,74 @@ const ctxTotal = computed(() => {
   if (!s) return 0;
   return (s.total_tokens || 0) + (s.tool_tokens || 0);
 });
+
+// --- Timeline: live SSE events vs historical trace JSONL ---
+const tlMode = ref<"live" | "history">("live");
+const showRawJson = ref(false);
+const traces = ref<TraceListItem[]>([]);
+const traceId = ref("");
+const typeFilter = ref("");
+const histEvents = ref<RuntimeEvent[]>([]);
+const histMeta = ref({ total: 0, shown: 0, path: "" });
+const tlError = ref("");
+const tlLoading = ref(false);
+
+const displayEvents = computed(() =>
+  tlMode.value === "live" ? props.events : histEvents.value,
+);
+
+async function loadTraceList() {
+  tlError.value = "";
+  try {
+    const data = await apiTraces();
+    traces.value = data.traces || [];
+  } catch (e) {
+    tlError.value = String((e as Error).message || e);
+    traces.value = [];
+  }
+}
+
+async function loadTrace() {
+  if (!traceId.value) return;
+  tlLoading.value = true;
+  tlError.value = "";
+  try {
+    const data = await apiTrace(traceId.value, {
+      type: typeFilter.value || undefined,
+      limit: 500,
+    });
+    histEvents.value = data.events || [];
+    histMeta.value = { total: data.total, shown: data.shown, path: data.path };
+  } catch (e) {
+    tlError.value = String((e as Error).message || e);
+    histEvents.value = [];
+  } finally {
+    tlLoading.value = false;
+  }
+}
+
+async function enterHistory() {
+  tlMode.value = "history";
+  await loadTraceList();
+  if (!traceId.value && traces.value.length) {
+    const cur = traces.value.find((t) => t.is_current) || traces.value[0];
+    traceId.value = cur.id;
+    await loadTrace();
+  }
+}
+
+function enterLive() {
+  tlMode.value = "live";
+  tlError.value = "";
+}
+
+function rawJson(e: RuntimeEvent) {
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
 </script>
 
 <template>
@@ -202,24 +271,88 @@ const ctxTotal = computed(() => {
       </template>
     </div>
 
-    <div class="subhead">Timeline</div>
-    <div class="timeline">
-      <div
-        v-for="(e, idx) in events"
-        :key="e.id || idx"
-        class="tl-item"
-        :class="eventClass(e.type)"
-      >
-        <span class="t">{{ timeFmt(e.time) }}</span>
-        <span class="ty">
-          {{ shortType(e.type) }}{{
-            e.type === "llm.stream_delta" && Number(e.data?.count || 1) > 1
-              ? ` (x${Number(e.data?.count)})`
-              : ""
+    <div class="subhead">
+      <span>
+        Timeline
+        <span class="hint">
+          {{
+            tlMode === "live"
+              ? "live · current session"
+              : `history · ${traceId || "—"}`
           }}
         </span>
-        <span v-if="previewData(e.data)" class="d">{{ previewData(e.data) }}</span>
+      </span>
+      <div class="tl-tools">
+        <button
+          type="button"
+          class="linkish"
+          :class="{ on: tlMode === 'live' }"
+          @click="enterLive()"
+        >
+          Live
+        </button>
+        <button
+          type="button"
+          class="linkish"
+          :class="{ on: tlMode === 'history' }"
+          @click="enterHistory()"
+        >
+          History
+        </button>
       </div>
+    </div>
+
+    <div v-if="tlMode === 'history'" class="tl-history-bar">
+      <select v-model="traceId" class="tl-select" @change="loadTrace()">
+        <option v-for="t in traces" :key="t.id" :value="t.id">
+          {{ t.id }}{{ t.is_current ? " (current)" : "" }}
+        </option>
+      </select>
+      <input
+        v-model="typeFilter"
+        class="tl-input"
+        placeholder="type 前缀，如 tool / llm"
+        @keyup.enter="loadTrace()"
+      />
+      <button type="button" class="linkish" :disabled="tlLoading" @click="loadTrace()">
+        Load
+      </button>
+      <label class="tl-raw">
+        <input v-model="showRawJson" type="checkbox" /> JSON
+      </label>
+    </div>
+    <div v-if="tlMode === 'history' && histMeta.shown" class="tl-history-meta">
+      {{ histMeta.shown }} / {{ histMeta.total }} events · {{ histMeta.path }}
+    </div>
+    <div v-if="tlError" class="exp-error">{{ tlError }}</div>
+
+    <div class="timeline">
+      <div v-if="!displayEvents.length" class="empty">
+        {{ tlMode === "live" ? "等待事件…" : "无历史事件" }}
+      </div>
+      <template v-else>
+        <div
+          v-for="(e, idx) in displayEvents"
+          :key="e.id || idx"
+          class="tl-item"
+          :class="eventClass(e.type)"
+        >
+          <template v-if="showRawJson && tlMode === 'history'">
+            <pre class="tl-raw-json">{{ rawJson(e) }}</pre>
+          </template>
+          <template v-else>
+            <span class="t">{{ timeFmt(e.time) }}</span>
+            <span class="ty">
+              {{ shortType(e.type) }}{{
+                e.type === "llm.stream_delta" && Number(e.data?.count || 1) > 1
+                  ? ` (x${Number(e.data?.count)})`
+                  : ""
+              }}
+            </span>
+            <span v-if="previewData(e.data)" class="d">{{ previewData(e.data) }}</span>
+          </template>
+        </div>
+      </template>
     </div>
   </section>
 </template>
