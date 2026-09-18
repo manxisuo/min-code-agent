@@ -84,15 +84,21 @@ func ReadEvents(path string) ([]Event, error) {
 	var events []Event
 	sc := bufio.NewScanner(f)
 	// Allow long tool-result lines later; 1MB per line is plenty for Phase 1.
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
+	lineNo := 0
 	for sc.Scan() {
+		lineNo++
 		line := sc.Bytes()
 		if len(line) == 0 {
 			continue
 		}
 		var e Event
 		if err := json.Unmarshal(line, &e); err != nil {
-			return nil, fmt.Errorf("parse trace line: %w", err)
+			// Skip corrupt lines instead of failing the whole trace browse.
+			continue
+		}
+		if e.Type == "" {
+			continue
 		}
 		events = append(events, e)
 	}

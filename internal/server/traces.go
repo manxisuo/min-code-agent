@@ -71,14 +71,17 @@ func (s *Server) handleTraceShow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(s.traceDir, id+".jsonl")
-	// Ensure path stays under traceDir.
 	cleanDir, err := filepath.Abs(s.traceDir)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	cleanPath, err := filepath.Abs(path)
-	if err != nil || !strings.HasPrefix(cleanPath, cleanDir+string(filepath.Separator)) && cleanPath != cleanDir {
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid trace path")
+		return
+	}
+	if !underDir(cleanDir, cleanPath) {
 		writeErr(w, http.StatusBadRequest, "invalid trace path")
 		return
 	}
@@ -137,4 +140,24 @@ func atoiSafe(s string) int {
 		}
 	}
 	return n
+}
+
+// underDir reports whether target is dir or a path inside dir (Windows-safe).
+func underDir(dir, target string) bool {
+	dir = filepath.Clean(dir)
+	target = filepath.Clean(target)
+	if strings.EqualFold(dir, target) {
+		return true
+	}
+	rel, err := filepath.Rel(dir, target)
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == string(filepath.Separator) {
+		return true
+	}
+	if strings.HasPrefix(rel, "..") {
+		return false
+	}
+	return !filepath.IsAbs(rel)
 }

@@ -125,9 +125,10 @@ const traces = ref<TraceListItem[]>([]);
 const traceId = ref("");
 const typeFilter = ref("");
 const histEvents = ref<RuntimeEvent[]>([]);
-const histMeta = ref({ total: 0, shown: 0, path: "" });
+const histMeta = ref({ total: 0, shown: 0, path: "", dir: "" });
 const tlError = ref("");
 const tlLoading = ref(false);
+const tlDir = ref("");
 
 const displayEvents = computed(() =>
   tlMode.value === "live" ? props.events : histEvents.value,
@@ -138,6 +139,7 @@ async function loadTraceList() {
   try {
     const data = await apiTraces();
     traces.value = data.traces || [];
+    tlDir.value = data.dir || "";
   } catch (e) {
     tlError.value = String((e as Error).message || e);
     traces.value = [];
@@ -154,7 +156,12 @@ async function loadTrace() {
       limit: 500,
     });
     histEvents.value = data.events || [];
-    histMeta.value = { total: data.total, shown: data.shown, path: data.path };
+    histMeta.value = {
+      total: data.total,
+      shown: data.shown,
+      path: data.path,
+      dir: tlDir.value,
+    };
   } catch (e) {
     tlError.value = String((e as Error).message || e);
     histEvents.value = [];
@@ -165,12 +172,18 @@ async function loadTrace() {
 
 async function enterHistory() {
   tlMode.value = "history";
+  histEvents.value = [];
   await loadTraceList();
-  if (!traceId.value && traces.value.length) {
-    const cur = traces.value.find((t) => t.is_current) || traces.value[0];
-    traceId.value = cur.id;
-    await loadTrace();
+  const pick =
+    traces.value.find((t) => t.is_current) ||
+    traces.value.find((t) => (t.size || 0) > 0) ||
+    traces.value[0];
+  if (!pick) {
+    histEvents.value = [];
+    return;
   }
+  traceId.value = pick.id;
+  await loadTrace();
 }
 
 function enterLive() {
@@ -305,7 +318,7 @@ function rawJson(e: RuntimeEvent) {
     <div v-if="tlMode === 'history'" class="tl-history-bar">
       <select v-model="traceId" class="tl-select" @change="loadTrace()">
         <option v-for="t in traces" :key="t.id" :value="t.id">
-          {{ t.id }}{{ t.is_current ? " (current)" : "" }}
+          {{ t.id }}{{ t.is_current ? " (current)" : "" }}{{ t.size ? ` · ${t.size}B` : "" }}
         </option>
       </select>
       <input
@@ -314,21 +327,41 @@ function rawJson(e: RuntimeEvent) {
         placeholder="type 前缀，如 tool / llm"
         @keyup.enter="loadTrace()"
       />
-      <button type="button" class="linkish" :disabled="tlLoading" @click="loadTrace()">
-        Load
+      <button
+        type="button"
+        class="linkish"
+        :disabled="tlLoading"
+        @click="
+          loadTraceList().then(() => {
+            if (traceId) return loadTrace();
+          })
+        "
+      >
+        Reload
       </button>
       <label class="tl-raw">
         <input v-model="showRawJson" type="checkbox" /> JSON
       </label>
     </div>
-    <div v-if="tlMode === 'history' && histMeta.shown" class="tl-history-meta">
-      {{ histMeta.shown }} / {{ histMeta.total }} events · {{ histMeta.path }}
+    <div v-if="tlMode === 'history' && (tlDir || histMeta.total)" class="tl-history-meta">
+      dir: {{ tlDir || histMeta.path || "—" }} · {{ traces.length }} files
+      <template v-if="histMeta.total || histMeta.shown">
+        · showing {{ histMeta.shown }} / {{ histMeta.total }} events
+      </template>
     </div>
     <div v-if="tlError" class="exp-error">{{ tlError }}</div>
 
     <div class="timeline">
       <div v-if="!displayEvents.length" class="empty">
-        {{ tlMode === "live" ? "等待事件…" : "无历史事件" }}
+        {{
+          tlMode === "live"
+            ? "等待事件…"
+            : tlLoading
+              ? "加载中…"
+              : traces.length
+                ? `无事件（trace=${traceId || "—"}）`
+                : `目录下无 .jsonl：${tlDir || "…"}`
+        }}
       </div>
       <template v-else>
         <div
