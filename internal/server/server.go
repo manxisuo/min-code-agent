@@ -13,6 +13,8 @@ import (
 
 	"github.com/manxisuo/mincode/internal/agent"
 	"github.com/manxisuo/mincode/internal/experiment"
+	"github.com/manxisuo/mincode/internal/instruction"
+	"github.com/manxisuo/mincode/internal/memory"
 	"github.com/manxisuo/mincode/internal/observability"
 	"github.com/manxisuo/mincode/internal/plan"
 	"github.com/manxisuo/mincode/internal/skill"
@@ -43,6 +45,8 @@ type Server struct {
 	planMu       sync.Mutex
 	skills       *skill.Loader
 	ws           *tools.Workspace
+	instr        *instruction.Loader
+	mem          *memory.Store
 	permMu       sync.Mutex
 	pendingPerms map[string]*pendingPerm
 
@@ -64,7 +68,7 @@ type Server struct {
 // New wires an agent + bus into an HTTP server. Subscribe on the bus so all
 // runtime events fan out to SSE clients without touching the agent loop.
 // exp and skills may be nil when those APIs should report empty lists.
-func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store, skills *skill.Loader, ws *tools.Workspace) *Server {
+func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store, skills *skill.Loader, ws *tools.Workspace, instr *instruction.Loader) *Server {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:8080"
 	}
@@ -85,6 +89,7 @@ func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observa
 		plans:        plan.NewManager(),
 		skills:       skills,
 		ws:           ws,
+		instr:        instr,
 		pendingPerms: map[string]*pendingPerm{},
 		hub:          newEventHub(),
 	}
@@ -121,6 +126,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/skills/{name}", s.handleSkillShow)
 	mux.HandleFunc("POST /api/skills/{name}/activate", s.handleSkillActivate)
 	mux.HandleFunc("POST /api/skills/{name}/deactivate", s.handleSkillDeactivate)
+	mux.HandleFunc("GET /api/instructions", s.handleInstructionList)
+	mux.HandleFunc("GET /api/instructions/all", s.handleInstructionShow)
+	mux.HandleFunc("POST /api/instructions/reload", s.handleInstructionReload)
+	mux.HandleFunc("GET /api/memory", s.handleMemoryGet)
+	mux.HandleFunc("POST /api/memory", s.handleMemoryAdd)
 	mux.HandleFunc("GET /api/permissions/pending", s.handlePermissionPending)
 	mux.HandleFunc("POST /api/permissions/{id}", s.handlePermissionDecide)
 

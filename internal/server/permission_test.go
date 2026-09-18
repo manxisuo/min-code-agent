@@ -17,7 +17,7 @@ func permReq(tool, args, summary string) permission.Request {
 
 func TestPermissionPendingAndDecide(t *testing.T) {
 	ag, bus, metrics := testAgent(t)
-	srv := New(Options{SessionID: "perm", Workspace: t.TempDir()}, ag, bus, metrics, nil, nil, nil)
+	srv := New(Options{SessionID: "perm", Workspace: t.TempDir()}, ag, bus, metrics, nil, nil, nil, nil)
 	ag.Approver = srv.WebApprover()
 
 	ts := httptest.NewServer(srv.Handler())

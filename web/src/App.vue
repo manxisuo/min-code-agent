@@ -3,6 +3,8 @@ import { computed, ref } from "vue";
 import ChatPanel from "./components/ChatPanel.vue";
 import ExperimentPanel from "./components/ExperimentPanel.vue";
 import InspectorPanel from "./components/InspectorPanel.vue";
+import InstructionsPanel from "./components/InstructionsPanel.vue";
+import MemoryPanel from "./components/MemoryPanel.vue";
 import PlanPanel from "./components/PlanPanel.vue";
 import PermissionBar from "./components/PermissionBar.vue";
 import SkillsPanel from "./components/SkillsPanel.vue";
@@ -26,7 +28,9 @@ const {
   fmtTime,
 } = useInspector();
 
-const view = ref<"inspector" | "plan" | "skills" | "experiments">("inspector");
+const view = ref<
+  "inspector" | "plan" | "skills" | "instructions" | "memory" | "experiments"
+>("inspector");
 
 const stateLabel = computed(() => session.value?.state || "IDLE");
 const running = computed(() => !!session.value?.running);
@@ -82,6 +86,20 @@ function onSend() {
           </button>
           <button
             type="button"
+            :class="{ active: view === 'instructions' }"
+            @click="view = 'instructions'"
+          >
+            Instructions
+          </button>
+          <button
+            type="button"
+            :class="{ active: view === 'memory' }"
+            @click="view = 'memory'"
+          >
+            Memory
+          </button>
+          <button
+            type="button"
             :class="{ active: view === 'experiments' }"
             @click="view = 'experiments'"
           >
@@ -100,7 +118,11 @@ function onSend() {
       class="layout"
       :class="{
         'layout-full':
-          view === 'experiments' || view === 'plan' || view === 'skills',
+          view === 'experiments' ||
+          view === 'plan' ||
+          view === 'skills' ||
+          view === 'instructions' ||
+          view === 'memory',
       }"
     >
       <template v-if="view === 'inspector'">
@@ -123,6 +145,8 @@ function onSend() {
       </template>
       <PlanPanel v-else-if="view === 'plan'" />
       <SkillsPanel v-else-if="view === 'skills'" />
+      <InstructionsPanel v-else-if="view === 'instructions'" />
+      <MemoryPanel v-else-if="view === 'memory'" />
       <ExperimentPanel v-else />
     </main>
   </div>

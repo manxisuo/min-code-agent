@@ -860,6 +860,63 @@ button.linkish:hover:not(:disabled) {
   align-items: center;
 }
 
+.instr-panel {
+  overflow: hidden;
+  min-height: 0;
+}
+.instr-panel .head-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.instr-meta {
+  padding: 6px 14px 0;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+.instr-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) 1fr;
+  overflow: hidden;
+}
+.instr-list {
+  overflow: auto;
+  padding: 10px;
+  border-right: 1px solid var(--line);
+}
+.instr-detail {
+  overflow: auto;
+  padding: 12px 14px 16px;
+}
+
+.mem-panel {
+  overflow: auto;
+  padding-bottom: 16px;
+}
+.mem-panel .head-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.mem-compose {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 12px 14px;
+}
+.mem-body {
+  padding: 0 14px 12px;
+}
+.mem-md {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--panel-2);
+}
+
 .perm-overlay {
   position: fixed;
   inset: 0;

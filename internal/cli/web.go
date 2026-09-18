@@ -170,8 +170,9 @@ func RunWeb(ctx context.Context, w WebOptions) error {
 		Provider:  provider.Name(),
 		Model:     provider.Model(),
 		TraceDir:  traceDir,
-	}, ag, bus, metrics, expStore, skillLoader, ws)
+	}, ag, bus, metrics, expStore, skillLoader, ws, instrLoader)
 	ag.Approver = srv.WebApprover()
+	srv.SetMemory(memStore)
 
 	bus.Publish(observability.NewEvent(sessionID, 0, observability.EventSessionCreated,
 		observability.SessionCreatedData{

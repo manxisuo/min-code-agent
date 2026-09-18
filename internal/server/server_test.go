@@ -58,7 +58,7 @@ func TestWebAPIChatAndEvents(t *testing.T) {
 		SessionID: "web-test",
 		Provider:  "fake",
 		Model:     "fake-model",
-	}, ag, bus, metrics, nil, nil, nil)
+	}, ag, bus, metrics, nil, nil, nil, nil)
 
 	// Trace history API
 	tr := httptest.NewServer(srv.Handler())
@@ -210,7 +210,7 @@ func TestWebChatConflictWhileRunning(t *testing.T) {
 	}
 	ag.Provider = fake
 
-	srv := New(Options{SessionID: "c"}, ag, bus, metrics, nil, nil, nil)
+	srv := New(Options{SessionID: "c"}, ag, bus, metrics, nil, nil, nil, nil)
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 
