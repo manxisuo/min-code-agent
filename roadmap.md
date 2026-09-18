@@ -418,9 +418,115 @@ MCP
 Long-term Memory
 Adaptive Tool Selection
 Plan-and-Execute
+Local Web Inspector     ✅ W1 已实现（HTTP/SSE + web/）
+LLM Streaming Output    ⏳ 已列入计划（见下）
 ```
 
 任何新增能力都必须同步设计对应可观测能力。
+
+---
+
+## 计划：LLM Streaming Output（未实现）
+
+### 动机
+
+当前 Provider 使用非流式 `/chat/completions`：
+
+```text
+取消 = 断开 HTTP
+本地 metrics 未记 usage
+服务商侧可能仍生成/计费一段
+UI 要等整段响应结束才能看到字
+```
+
+流式输出可：
+
+```text
+边生成边展示（CLI / Web）
+Cancel 更早中断传输
+首 token 延迟可测（TTFT）
+```
+
+### 目标行为
+
+```text
+Provider 接口增加流式变体（或 Chat 支持 stream 回调）
+兼容 OpenAI-compatible SSE: data: {...} / [DONE]
+Agent Loop 仍聚合成完整 Message 再进 Context
+取消：立即停止读流；记录 partial tokens（若有）
+```
+
+### 第一版范围（建议）
+
+```text
+internal/llm: CompatibleProvider 支持 stream=true
+事件: llm.stream_started / llm.stream_delta / llm.stream_finished
+     或 llm.token_delta + 汇总到 llm.request_finished
+CLI: 回合内流式打印 Assistant 文本
+Web: SSE 增量写入聊天区
+Metrics: ttft_ms、partial_output_tokens（取消时）
+Provider interface 保持可替换；Fake 提供可测流式脚本
+```
+
+### 明确不做（第一版）
+
+```text
+流式 tool_call 增量解析进 Agent 中途执行
+多 Provider 流协议统一到极致
+Token 级计费对账（服务商侧）
+```
+
+### 可观测要求
+
+```text
+Trace 可见 stream 生命周期
+Timeline 区分「首个增量」与「聚合完成」
+取消时标明 stream aborted + 是否已产生 partial usage
+```
+
+### 建议接入顺序
+
+```text
+1) llm.Provider 流式扩展 + Fake + 单测
+2) Agent 聚合与取消路径
+3) CLI 流式回显
+4) Web 聊天区增量渲染
+5) 文档与 roadmap 勾选
+```
+
+---
+
+## W1：Local Web Inspector（已实现）
+
+### 目标
+
+本机单用户：`mincode web` 启动 HTTP + SSE，浏览器查看对话与 Runtime 可观测数据。
+
+### 实现
+
+```text
+cmd: mincode web [workspace] [--addr]
+internal/server: /api/session|chat|cancel|events(SSE)|context|metrics|timeline
+web/: index.html + style.css + app.js（embed）
+Bus.Subscribe → SSE fan-out（不侵入 Agent Loop）
+```
+
+### W1 边界
+
+```text
+仅本地单会话
+Ask 级写操作自动批准（危险 shell 仍拒绝）
+无登录 / 无远程 workspace / 无 Vue 工程
+```
+
+### 后续可选
+
+```text
+网页 Permission 审批
+Experiment Dashboard
+Timeline 图形化（并行 batch 分叉）
+LLM 流式输出写入聊天区（见「计划：LLM Streaming Output」）
+```
 
 ---
 

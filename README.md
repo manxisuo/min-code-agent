@@ -4,7 +4,7 @@ Min Code Agent 是一个面向学习、实验和研究的轻量级 Code Agent Ru
 
 它的目标不是复制 Claude Code、Codex CLI、Cursor Agent 或 OpenCode，也不是追求功能数量，而是通过一个结构清晰、行为透明、可观测、可扩展的实现，理解现代 Code Agent 的核心工作机制。
 
-**当前状态：Roadmap Phase 0–12 已完成**，并包含 Hardening 修复、MVP 验收测试，以及高级实验 **Parallel Tool Calls**。
+**当前状态：Roadmap Phase 0–12 已完成**，并包含 Hardening 修复、MVP 验收测试、Parallel Tool Calls，以及 **W1 Local Web Inspector**。
 
 ## 核心目标
 
@@ -130,6 +130,18 @@ mincode -p "分析这个项目"
 mincode --continue
 mincode replay <session-id>
 ```
+
+本地 Web Inspector（W1）：
+
+```bash
+mincode web              # 默认 http://127.0.0.1:8080
+mincode web . --addr 127.0.0.1:9090
+```
+
+浏览器打开后左侧对话、右侧实时 Timeline / Context / Metrics。  
+静态页在 `web/`（`index.html` / `style.css` / `app.js`），由 Go `embed` 托管。
+
+后续计划含 **LLM 流式输出**（边生成边展示、取消更早中断），详见 `roadmap.md`。
 
 实验对比：
 

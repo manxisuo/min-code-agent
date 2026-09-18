@@ -148,12 +148,18 @@ func (p *CompatibleProvider) Chat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	resp, err := p.HTTPClient.Do(httpReq)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, &ProviderError{Provider: p.Name(), Err: err}
 	}
 	defer resp.Body.Close()
 
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, ctxErr
+		}
 		return nil, &ProviderError{Provider: p.Name(), Status: resp.StatusCode, Err: err}
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

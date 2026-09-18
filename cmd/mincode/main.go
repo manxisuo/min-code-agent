@@ -32,6 +32,37 @@ func main() {
 		os.Exit(cli.RunExperimentCLI(os.Args[2:], os.Stdout))
 	}
 
+	// Local web inspector: mincode web [workspace]
+	if len(os.Args) > 1 && os.Args[1] == "web" {
+		wopts := cli.WebOptions{}
+		wfs := flag.NewFlagSet("web", flag.ExitOnError)
+		wfs.StringVar(&wopts.ConfigPath, "config", "", "path to mincode.yaml")
+		wfs.StringVar(&wopts.Addr, "addr", "127.0.0.1:8080", "listen address")
+		wfs.StringVar(&wopts.Model, "model", "", "override model name")
+		wfs.StringVar(&wopts.Provider, "provider", "", "override provider type")
+		wfs.StringVar(&wopts.Workspace, "workspace", "", "workspace directory (default: cwd)")
+		wfs.Usage = func() {
+			fmt.Fprintf(wfs.Output(), `Usage: mincode web [flags] [workspace-dir]
+
+Start the local Web Inspector (HTTP + SSE) for this workspace.
+
+Flags:
+`)
+			wfs.PrintDefaults()
+		}
+		_ = wfs.Parse(os.Args[2:])
+		if wfs.NArg() > 0 && wopts.Workspace == "" {
+			wopts.Workspace = wfs.Arg(0)
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := cli.RunWeb(ctx, wopts); err != nil && err != context.Canceled {
+			fmt.Fprintf(os.Stderr, "mincode web: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	opts := cli.Options{}
 	flag.StringVar(&opts.ConfigPath, "config", "", "path to mincode.yaml")
 	flag.StringVar(&opts.Prompt, "p", "", "run a single prompt and exit")
@@ -51,6 +82,7 @@ Usage:
   mincode replay <session-id>
   mincode --replay <session-id|.jsonl>
   mincode experiment run|list|show|compare
+  mincode web [flags] [workspace-dir]
 
 Flags:
 `)

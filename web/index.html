@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MinCode Inspector</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo">MC</span>
+      <div>
+        <strong>MinCode Inspector</strong>
+        <div class="meta" id="sessionMeta">connecting…</div>
+      </div>
+    </div>
+    <div class="top-right">
+      <span class="pill" id="statePill">IDLE</span>
+      <button id="btnCancel" type="button" disabled>Cancel</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel chat">
+      <div class="panel-head">
+        <h2>Conversation</h2>
+        <span class="hint">Local Web · single session</span>
+      </div>
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="chatForm" class="composer">
+        <textarea id="input" rows="3" placeholder="输入消息，例如：分析这个项目的入口和架构。" required></textarea>
+        <button id="btnSend" type="submit">Send</button>
+      </form>
+    </section>
+
+    <section class="panel inspector">
+      <div class="panel-head">
+        <h2>Runtime Inspector</h2>
+      </div>
+
+      <div class="metrics" id="metricsBox">
+        <div class="m"><span>LLM</span><b id="mLlm">0</b></div>
+        <div class="m"><span>Tokens</span><b id="mTokens">0</b></div>
+        <div class="m"><span>LLM Time</span><b id="mTime">0ms</b></div>
+        <div class="m"><span>∥ Batches</span><b id="mPar">0</b></div>
+        <div class="m"><span>Errors</span><b id="mErr">0</b></div>
+      </div>
+
+      <div class="subhead">Context snapshot</div>
+      <div id="contextBox" class="context">
+        <div class="empty">尚无快照</div>
+      </div>
+
+      <div class="subhead">Timeline <span class="hint" id="tlCount"></span></div>
+      <div id="timeline" class="timeline"></div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
