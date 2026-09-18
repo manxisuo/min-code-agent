@@ -39,6 +39,12 @@ function compact(v: unknown): string {
 
 function previewData(data?: Record<string, unknown>): string {
   if (!data) return "";
+  if (data.count != null && (data.preview_tail || data.total_len != null)) {
+    const n = Number(data.count) || 1;
+    const tail = String(data.preview_tail || data.text || "").slice(0, 36);
+    const len = data.total_len != null ? ` · ${data.total_len}B` : "";
+    return `${n > 1 ? `x${n}` : ""} ${tail}${len}`.trim();
+  }
   if (data.text != null && data.total_len != null) {
     return String(data.text).slice(0, 40);
   }
@@ -148,16 +154,38 @@ export function useInspector() {
   }
 
   function pushEvent(evt: RuntimeEvent) {
+    // Collapse consecutive stream deltas in the timeline: "L.stream.delta (x10)"
+    if (evt.type === "llm.stream_delta") {
+      const last = events.value[events.value.length - 1];
+      const text = typeof evt.data?.text === "string" ? evt.data.text : "";
+      if (last && last.type === "llm.stream_delta") {
+        const count = Number(last.data?.count || 1) + 1;
+        last.data = {
+          ...(last.data || {}),
+          ...(evt.data || {}),
+          count,
+          // Keep a short preview of recent fragments only.
+          text: String(last.data?.preview_tail || "") + text,
+          preview_tail: (String(last.data?.preview_tail || "") + text).slice(-40),
+          time: last.time,
+        };
+      } else {
+        events.value.push({
+          ...evt,
+          data: { ...(evt.data || {}), count: 1, preview_tail: text.slice(-40), text },
+        });
+      }
+      // Stream bubble updates use the same delta stream.
+      if (text) {
+        streamPending += text;
+        scheduleStreamFlush();
+      }
+      return;
+    }
+
     events.value.push(evt);
     if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
 
-    if (evt.type === "llm.stream_delta") {
-      const t = evt.data?.text;
-      if (typeof t === "string" && t) {
-        streamPending += t;
-        scheduleStreamFlush();
-      }
-    }
     if (evt.type === "llm.request_finished" || evt.type === "llm.request_failed") {
       flushStreamDelta();
       streamMsgId = null;

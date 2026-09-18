@@ -198,7 +198,13 @@ const ctxTotal = computed(() => {
         :class="eventClass(e.type)"
       >
         <span class="t">{{ timeFmt(e.time) }}</span>
-        <span class="ty">{{ shortType(e.type) }}</span>
+        <span class="ty">
+          {{ shortType(e.type) }}{{
+            e.type === "llm.stream_delta" && Number(e.data?.count || 1) > 1
+              ? ` (x${Number(e.data?.count)})`
+              : ""
+          }}
+        </span>
         <span v-if="previewData(e.data)" class="d">{{ previewData(e.data) }}</span>
       </div>
     </div>
