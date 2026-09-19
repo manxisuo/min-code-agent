@@ -186,6 +186,12 @@ function compactArg(s?: string): string {
   }
 }
 
+function shortErr(s?: string, n = 72): string {
+  const t = (s || "").replace(/\s+/g, " ").trim();
+  if (t.length <= n) return t;
+  return t.slice(0, n) + "…";
+}
+
 function mergeBatchTools(tools: RuntimeEvent[]): BatchToolRow[] {
   const map = new Map<string, BatchToolRow>();
   const order: string[] = [];
@@ -551,9 +557,9 @@ function rawJson(e: RuntimeEvent) {
               >
                 <span class="branch-arm" aria-hidden="true"></span>
                 <span class="branch-tool">{{ tr.tool }}</span>
-                <span v-if="tr.args" class="d">{{ tr.args }}</span>
-                <span class="branch-stat">
-                  <template v-if="tr.ok === false">✗ {{ tr.error || "error" }}</template>
+                <span class="d" :title="tr.args">{{ tr.args }}</span>
+                <span class="branch-stat" :title="tr.ok === false ? tr.error : undefined">
+                  <template v-if="tr.ok === false">✗ {{ shortErr(tr.error, 80) || "error" }}</template>
                   <template v-else-if="tr.status === 'finished' || tr.ms || tr.bytes">
                     ✓ {{ tr.ms }}ms · {{ tr.bytes }}B
                   </template>

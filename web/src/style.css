@@ -508,6 +508,8 @@ button.linkish:hover:not(:disabled) {
   background: rgba(210, 153, 34, 0.06);
   font-family: var(--mono);
   font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
 }
 .tl-batch-head {
   display: flex;
@@ -524,15 +526,55 @@ button.linkish:hover:not(:disabled) {
 .tl-batch-head .cnt { color: var(--ink); font-weight: 600; }
 .tl-batch-head .meta { color: var(--muted); }
 .tl-batch-head .t { color: var(--muted); margin-left: auto; font-size: 11px; }
-.tl-batch-body { padding-left: 4px; }
+.tl-batch-body { padding-left: 4px; min-width: 0; }
 .tl-branch {
   position: relative;
   display: grid;
-  grid-template-columns: 16px minmax(72px, auto) 1fr auto;
+  grid-template-columns: 16px minmax(64px, max-content) minmax(0, 1fr) minmax(0, max-content);
   gap: 6px;
   align-items: center;
   min-height: 22px;
   padding: 2px 0 2px 4px;
+  min-width: 0;
+}
+.tl-branch .d {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.tl-branch .branch-tool {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--accent);
+  font-weight: 600;
+}
+.tl-branch .branch-stat {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  justify-self: end;
+}
+/* Long errors: allow two-line wrap inside the row instead of overflowing */
+.tl-branch.fail {
+  grid-template-columns: 16px minmax(64px, max-content) 1fr;
+  align-items: start;
+}
+.tl-branch.fail .d {
+  grid-column: 2 / 3;
+}
+.tl-branch.fail .branch-stat {
+  grid-column: 2 / -1;
+  max-width: none;
+  white-space: normal;
+  word-break: break-all;
+  justify-self: start;
+  margin-top: 2px;
 }
 .tl-branch .branch-arm {
   position: relative;
@@ -566,10 +608,6 @@ button.linkish:hover:not(:disabled) {
 .tl-branch .branch-tool {
   color: var(--accent);
   font-weight: 600;
-}
-.tl-branch .branch-stat {
-  color: var(--muted);
-  white-space: nowrap;
 }
 .tl-branch.fail .branch-tool { color: var(--err); }
 .tl-branch.fail .branch-stat { color: var(--err); }
