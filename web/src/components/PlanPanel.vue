@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   apiPlan,
   apiPlanApprove,
@@ -8,6 +8,11 @@ import {
   apiPlanReject,
 } from "../planApi";
 import type { Plan } from "../types";
+
+const props = defineProps<{
+  /** Timeline deep-link: increment to force refresh. */
+  bump?: number;
+}>();
 
 const plan = ref<Plan | null>(null);
 const goal = ref("");
@@ -116,6 +121,13 @@ function mark(st: string): string {
 }
 
 defineExpose({ refresh });
+
+watch(
+  () => props.bump,
+  () => {
+    void refresh();
+  },
+);
 
 let poll: number | null = null;
 onMounted(() => {

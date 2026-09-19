@@ -12,6 +12,9 @@ function eventClass(type: string): string {
   if (type.startsWith("tool.")) return "tool";
   if (type.startsWith("llm.stream")) return "stream";
   if (type.startsWith("llm.")) return "llm";
+  if (type.startsWith("skill.")) return "skill";
+  if (type.startsWith("plan.")) return "plan";
+  if (type.startsWith("permission.")) return "perm";
   if (type.includes("failed") || type.includes("denied") || type.includes("loop")) return "err";
   return "";
 }
@@ -40,6 +43,9 @@ function compact(v: unknown): string {
 
 function previewData(data?: Record<string, unknown>): string {
   if (!data) return "";
+  if (data.name != null && typeof data.name === "string") {
+    return data.name;
+  }
   if (data.count != null && (data.preview_tail || data.total_len != null)) {
     const n = Number(data.count) || 1;
     const tail = String(data.preview_tail || data.text || "").slice(0, 36);

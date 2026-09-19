@@ -13,6 +13,22 @@ const props = defineProps<{
   previewData: (data?: Record<string, unknown>) => string;
 }>();
 
+const emit = defineEmits<{
+  deeplink: [type: string, data?: Record<string, unknown>];
+}>();
+
+function isDeeplink(e: RuntimeEvent): boolean {
+  return (
+    typeof e.type === "string" &&
+    (e.type.startsWith("skill.") || e.type.startsWith("plan."))
+  );
+}
+
+function onTimelineClick(e: RuntimeEvent) {
+  if (!isDeeplink(e)) return;
+  emit("deeplink", e.type, e.data);
+}
+
 type ItemRow = {
   index: number;
   source: string;
@@ -374,7 +390,9 @@ function rawJson(e: RuntimeEvent) {
           v-for="(e, idx) in displayEvents"
           :key="e.id || idx"
           class="tl-item"
-          :class="eventClass(e.type)"
+          :class="[eventClass(e.type), { deeplink: isDeeplink(e) }]"
+          :title="isDeeplink(e) ? '点击查看 Skill / Plan 详情' : undefined"
+          @click="onTimelineClick(e)"
         >
           <template v-if="showRawJson && tlMode === 'history'">
             <pre class="tl-raw-json">{{ rawJson(e) }}</pre>
@@ -389,6 +407,10 @@ function rawJson(e: RuntimeEvent) {
               }}
             </span>
             <span v-if="previewData(e.data)" class="d">{{ previewData(e.data) }}</span>
+            <span
+              v-if="isDeeplink(e)"
+              class="tl-goto"
+            >↗</span>
           </template>
         </div>
       </template>

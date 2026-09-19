@@ -49,6 +49,21 @@ const meta = computed(() => {
 });
 const themeLabel = computed(() => (theme.value === "dark" ? "Light" : "Dark"));
 const exportBusy = ref(false);
+const openSkillName = ref("");
+const planBump = ref(0);
+
+function onTimelineDeepLink(type: string, data?: Record<string, unknown>) {
+  const name = data && data.name != null ? String(data.name) : "";
+  if (type.startsWith("skill.")) {
+    if (name) openSkillName.value = name;
+    view.value = "skills";
+    return;
+  }
+  if (type.startsWith("plan.")) {
+    planBump.value++;
+    view.value = "plan";
+  }
+}
 const toast = ref<{ text: string; kind: "ok" | "err" | "info" } | null>(null);
 let toastTimer: number | null = null;
 
@@ -234,10 +249,11 @@ async function onSwitchSession(id: string) {
           :event-class="eventClass"
           :short-type="shortType"
           :preview-data="previewData"
+          @deeplink="onTimelineDeepLink"
         />
       </template>
-      <PlanPanel v-else-if="view === 'plan'" />
-      <SkillsPanel v-else-if="view === 'skills'" />
+      <PlanPanel v-else-if="view === 'plan'" :bump="planBump" />
+      <SkillsPanel v-else-if="view === 'skills'" :open-name="openSkillName" />
       <InstructionsPanel v-else-if="view === 'instructions'" />
       <MemoryPanel v-else-if="view === 'memory'" />
       <SessionsPanel

@@ -482,7 +482,21 @@ button.linkish:hover:not(:disabled) {
 .tl-item.stream .ty { color: var(--stream-accent); }
 .tl-item.batch .ty { color: var(--warn); }
 .tl-item.err .ty { color: var(--err); }
+.tl-item.skill .ty { color: var(--ok); }
+.tl-item.plan .ty { color: var(--warn); }
+.tl-item.perm .ty { color: var(--accent); }
 .tl-item .d { color: var(--muted); word-break: break-all; }
+.tl-item.deeplink {
+  cursor: pointer;
+}
+.tl-item.deeplink:hover {
+  background: var(--panel-2);
+}
+.tl-goto {
+  margin-left: 6px;
+  color: var(--accent);
+  font-weight: 600;
+}
 
 .top-right { display: flex; gap: 10px; align-items: center; }
 

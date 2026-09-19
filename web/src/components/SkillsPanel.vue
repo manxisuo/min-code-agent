@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import {
   apiSkill,
   apiSkillActivate,
@@ -8,6 +8,11 @@ import {
 } from "../skillApi";
 import type { SkillDetail, SkillListItem } from "../types";
 import MdText from "./MdText.vue";
+
+const props = defineProps<{
+  /** Timeline deep-link: open this skill name when set/changed. */
+  openName?: string;
+}>();
 
 const skills = ref<SkillListItem[]>([]);
 const skillsDir = ref("skills/");
@@ -71,6 +76,17 @@ async function toggleActive(name: string, active: boolean, ev?: Event) {
     busyName.value = "";
   }
 }
+
+watch(
+  () => props.openName,
+  (name) => {
+    if (!name) return;
+    void (async () => {
+      await refresh();
+      await open(name);
+    })();
+  },
+);
 
 let poll: number | null = null;
 onMounted(() => {
