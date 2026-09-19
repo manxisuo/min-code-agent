@@ -151,6 +151,143 @@ const displayEvents = computed(() =>
   tlMode.value === "live" ? props.events : histEvents.value,
 );
 
+/** Merged tool row inside a parallel batch. */
+type BatchToolRow = {
+  tool: string;
+  args: string;
+  ok: boolean;
+  ms: number;
+  bytes: number;
+  error: string;
+  status: string;
+};
+
+type TimelineRow =
+  | { kind: "event"; e: RuntimeEvent }
+  | {
+      kind: "batch";
+      id: string;
+      time?: string;
+      tools: string[];
+      rows: BatchToolRow[];
+      ms: number;
+      succeeded: number;
+      failed: number;
+      maxWorkers: number;
+      raw: RuntimeEvent[];
+    };
+
+function compactArg(s?: string): string {
+  if (!s) return "";
+  try {
+    return JSON.stringify(JSON.parse(s));
+  } catch {
+    return String(s).slice(0, 72);
+  }
+}
+
+function mergeBatchTools(tools: RuntimeEvent[]): BatchToolRow[] {
+  const map = new Map<string, BatchToolRow>();
+  const order: string[] = [];
+  for (const e of tools) {
+    const d = e.data || {};
+    const key = String(d.call_id || d.tool || e.id || order.length);
+    let row = map.get(key);
+    if (!row) {
+      row = {
+        tool: String(d.tool || ""),
+        args: compactArg(typeof d.arguments === "string" ? d.arguments : ""),
+        ok: true,
+        ms: 0,
+        bytes: 0,
+        error: "",
+        status: e.type,
+      };
+      map.set(key, row);
+      order.push(key);
+    }
+    if (d.tool) row.tool = String(d.tool);
+    if (typeof d.arguments === "string") {
+      const c = compactArg(d.arguments);
+      if (c) row.args = c;
+    }
+    if (e.type === "tool.finished") {
+      row.status = "finished";
+      row.ms = Number(d.duration_ms || 0);
+      row.bytes = Number(d.result_size || 0);
+      row.ok = !d.is_error;
+      if (d.error) row.error = String(d.error);
+    } else if (e.type === "tool.failed") {
+      row.status = "failed";
+      row.ok = false;
+      row.ms = Number(d.duration_ms || 0);
+      row.error = String(d.error || "");
+    } else {
+      row.status = e.type;
+    }
+  }
+  return order.map((k) => map.get(k)!);
+}
+
+/** Fold tool.batch_* + member tool events into a visual batch block. */
+const timelineRows = computed<TimelineRow[]>(() => {
+  const events = displayEvents.value;
+  const out: TimelineRow[] = [];
+  let i = 0;
+  while (i < events.length) {
+    const e = events[i];
+    if (e.type !== "tool.batch_started") {
+      out.push({ kind: "event", e });
+      i++;
+      continue;
+    }
+    const tools: RuntimeEvent[] = [];
+    let j = i + 1;
+    let finish: RuntimeEvent | undefined;
+    while (j < events.length) {
+      const t = events[j];
+      if (t.type === "tool.batch_finished" || t.type === "tool.batch_started") break;
+      if (
+        t.type === "tool.started" ||
+        t.type === "tool.finished" ||
+        t.type === "tool.failed" ||
+        t.type === "permission.requested" ||
+        t.type === "permission.approved" ||
+        t.type === "permission.denied"
+      ) {
+        tools.push(t);
+      }
+      j++;
+    }
+    if (j < events.length && events[j].type === "tool.batch_finished") {
+      finish = events[j];
+      j++;
+    }
+    const startData = e.data || {};
+    const finData = (finish && finish.data) || {};
+    const named =
+      Array.isArray(startData.tools) && startData.tools.length
+        ? (startData.tools as unknown[]).map(String)
+        : mergeBatchTools(tools).map((r) => r.tool || "?");
+    out.push({
+      kind: "batch",
+      id: String(e.id || startData.call_ids || `batch-${i}`),
+      time: e.time,
+      tools: named,
+      rows: mergeBatchTools(tools.filter((t) => t.type.startsWith("tool."))),
+      ms: Number(finData.duration_ms || 0),
+      succeeded: Number(finData.succeeded || 0),
+      failed: Number(finData.failed || 0),
+      maxWorkers: Number(
+        finData.max_workers || startData.max_workers || named.length,
+      ),
+      raw: finish ? [e, ...tools, finish] : [e, ...tools],
+    });
+    i = j;
+  }
+  return out;
+});
+
 async function loadTraceList() {
   tlError.value = "";
   try {
@@ -372,7 +509,7 @@ function rawJson(e: RuntimeEvent) {
     <div v-if="tlError" class="exp-error">{{ tlError }}</div>
 
     <div class="timeline">
-      <div v-if="!displayEvents.length" class="empty">
+      <div v-if="!timelineRows.length" class="empty">
         {{
           tlMode === "live"
             ? "等待事件…"
@@ -386,33 +523,71 @@ function rawJson(e: RuntimeEvent) {
         }}
       </div>
       <template v-else>
-        <div
-          v-for="(e, idx) in displayEvents"
-          :key="e.id || idx"
-          class="tl-item"
-          :class="[eventClass(e.type), { deeplink: isDeeplink(e) }]"
-          :title="isDeeplink(e) ? '点击查看 Skill / Plan 详情' : undefined"
-          @click="onTimelineClick(e)"
-        >
-          <template v-if="showRawJson && tlMode === 'history'">
-            <pre class="tl-raw-json">{{ rawJson(e) }}</pre>
-          </template>
-          <template v-else>
-            <span class="t">{{ timeFmt(e.time) }}</span>
-            <span class="ty">
-              {{ shortType(e.type) }}{{
-                e.type === "llm.stream_delta" && Number(e.data?.count || 1) > 1
-                  ? ` (x${Number(e.data?.count)})`
-                  : ""
-              }}
-            </span>
-            <span v-if="previewData(e.data)" class="d">{{ previewData(e.data) }}</span>
-            <span
-              v-if="isDeeplink(e)"
-              class="tl-goto"
-            >↗</span>
-          </template>
-        </div>
+        <template v-for="(row, idx) in timelineRows" :key="row.kind === 'batch' ? row.id : row.e.id || idx">
+          <!-- Parallel tool batch: graphical fork block -->
+          <div
+            v-if="row.kind === 'batch'"
+            class="tl-batch"
+          >
+            <div class="tl-batch-head">
+              <span class="fork-icon">⇉</span>
+              <span class="ty">parallel batch</span>
+              <span class="cnt">×{{ row.tools.length }}</span>
+              <span class="meta">
+                workers={{ row.maxWorkers }}
+                <template v-if="row.ms"> · {{ row.ms }}ms</template>
+                <template v-if="row.succeeded || row.failed">
+                  · ok={{ row.succeeded }} err={{ row.failed }}
+                </template>
+              </span>
+              <span class="t">{{ timeFmt(row.time) }}</span>
+            </div>
+            <div class="tl-batch-body">
+              <div
+                v-for="(tr, ti) in row.rows.length ? row.rows : row.tools.map((name) => ({ tool: name, args: '', ok: true, ms: 0, bytes: 0, error: '', status: 'named' }))"
+                :key="ti"
+                class="tl-branch"
+                :class="{ fail: tr.ok === false, last: ti === (row.rows.length ? row.rows.length : row.tools.length) - 1 }"
+              >
+                <span class="branch-arm" aria-hidden="true"></span>
+                <span class="branch-tool">{{ tr.tool }}</span>
+                <span v-if="tr.args" class="d">{{ tr.args }}</span>
+                <span class="branch-stat">
+                  <template v-if="tr.ok === false">✗ {{ tr.error || "error" }}</template>
+                  <template v-else-if="tr.status === 'finished' || tr.ms || tr.bytes">
+                    ✓ {{ tr.ms }}ms · {{ tr.bytes }}B
+                  </template>
+                  <template v-else>…</template>
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Ordinary timeline event -->
+          <div
+            v-else
+            class="tl-item"
+            :class="[eventClass(row.e.type), { deeplink: isDeeplink(row.e) }]"
+            :title="isDeeplink(row.e) ? '点击查看 Skill / Plan 详情' : undefined"
+            @click="onTimelineClick(row.e)"
+          >
+            <template v-if="showRawJson && tlMode === 'history'">
+              <pre class="tl-raw-json">{{ rawJson(row.e) }}</pre>
+            </template>
+            <template v-else>
+              <span class="t">{{ timeFmt(row.e.time) }}</span>
+              <span class="ty">
+                {{ shortType(row.e.type) }}{{
+                  row.e.type === "llm.stream_delta" && Number(row.e.data?.count || 1) > 1
+                    ? ` (x${Number(row.e.data?.count)})`
+                    : ""
+                }}
+              </span>
+              <span v-if="previewData(row.e.data)" class="d">{{ previewData(row.e.data) }}</span>
+              <span v-if="isDeeplink(row.e)" class="tl-goto">↗</span>
+            </template>
+          </div>
+        </template>
       </template>
     </div>
   </section>

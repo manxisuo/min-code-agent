@@ -498,6 +498,82 @@ button.linkish:hover:not(:disabled) {
   font-weight: 600;
 }
 
+/* Parallel tool batch fork visualization */
+.tl-batch {
+  margin: 8px 0 10px 8px;
+  padding: 6px 8px 8px;
+  border: 1px solid rgba(210, 153, 34, 0.45);
+  border-left: 3px solid var(--warn);
+  border-radius: 8px;
+  background: rgba(210, 153, 34, 0.06);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tl-batch-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.tl-batch-head .fork-icon {
+  color: var(--warn);
+  font-weight: 700;
+}
+.tl-batch-head .ty { color: var(--warn); }
+.tl-batch-head .cnt { color: var(--ink); font-weight: 600; }
+.tl-batch-head .meta { color: var(--muted); }
+.tl-batch-head .t { color: var(--muted); margin-left: auto; font-size: 11px; }
+.tl-batch-body { padding-left: 4px; }
+.tl-branch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px minmax(72px, auto) 1fr auto;
+  gap: 6px;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 0 2px 4px;
+}
+.tl-branch .branch-arm {
+  position: relative;
+  align-self: stretch;
+  min-height: 20px;
+}
+/* vertical spine + elbow into each branch */
+.tl-branch .branch-arm::before {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1.5px solid var(--warn);
+  opacity: 0.75;
+}
+.tl-branch .branch-arm::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  width: 9px;
+  height: 0;
+  border-top: 1.5px solid var(--warn);
+  opacity: 0.75;
+}
+.tl-branch.last .branch-arm::before {
+  bottom: 50%;
+}
+.tl-branch .branch-tool {
+  color: var(--accent);
+  font-weight: 600;
+}
+.tl-branch .branch-stat {
+  color: var(--muted);
+  white-space: nowrap;
+}
+.tl-branch.fail .branch-tool { color: var(--err); }
+.tl-branch.fail .branch-stat { color: var(--err); }
+
 .top-right { display: flex; gap: 10px; align-items: center; }
 
 .view-tabs {
