@@ -94,6 +94,8 @@ export function useInspector() {
   let streamMsgId: string | null = null;
   let streamFlush: number | null = null;
   let streamPending = "";
+  /** True once this turn's final answer has been written into chat. */
+  let turnStreamClosed = false;
   /** Last session turn.id whose final answer was written into the chat. */
   let lastFinalTurnId = -1;
   /** Text of the last assistant bubble written for final/stream sync. */
@@ -134,7 +136,8 @@ export function useInspector() {
 
   /**
    * Insert or refine the assistant answer once per completed turn.
-   * Never runs while a turn is in flight (stale finals must not reappear).
+   * Collapses any stream fragment bubbles from this turn into a single
+   * final bubble so a coalesced tail + session poll cannot duplicate text.
    */
   function appendAssistantOnce(final: string, turnId?: number) {
     if (!final) return;
@@ -143,32 +146,47 @@ export function useInspector() {
     const tid = turnId ?? 0;
     if (tid && tid === lastFinalTurnId && fin === lastAssistantText) return;
 
-    const last = [...messages.value].reverse().find((m) => m.role === "assistant");
-    if (last) {
-      const lastText = last.text.trim();
-      if (lastText === fin) {
-        lastAssistantText = fin;
-        if (tid) lastFinalTurnId = tid;
-        return;
-      }
-      // Streamed prefix → replace with full final.
-      if (fin.startsWith(lastText) || lastText.startsWith(fin.slice(0, Math.min(40, fin.length)))) {
-        last.text = fin;
-        lastAssistantText = fin;
-        if (tid) lastFinalTurnId = tid;
-        return;
-      }
-      if (lastText.includes(fin.slice(0, Math.min(40, fin.length)))) {
-        if (tid) lastFinalTurnId = tid;
-        return;
+    let lastUser = -1;
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      if (messages.value[i].role === "user") {
+        lastUser = i;
+        break;
       }
     }
-    addMessage("assistant", fin);
+    const assistIdx: number[] = [];
+    for (let i = lastUser + 1; i < messages.value.length; i++) {
+      if (messages.value[i].role === "assistant") assistIdx.push(i);
+    }
+
+    if (assistIdx.length === 0) {
+      addMessage("assistant", fin);
+    } else {
+      // One turn → one assistant answer. Stream fragments are display
+      // artifacts of the same final content.
+      const first = messages.value[assistIdx[0]];
+      first.text = fin;
+      for (let k = assistIdx.length - 1; k >= 1; k--) {
+        messages.value.splice(assistIdx[k], 1);
+      }
+      lastAssistantText = fin;
+    }
+
+    streamMsgId = null;
+    streamPending = "";
+    if (streamFlush != null) {
+      window.clearTimeout(streamFlush);
+      streamFlush = null;
+    }
+    turnStreamClosed = true;
     if (tid) lastFinalTurnId = tid;
   }
 
   function flushStreamDelta() {
     if (!streamPending) return;
+    if (turnStreamClosed) {
+      streamPending = "";
+      return;
+    }
     const piece = streamPending;
     streamPending = "";
     if (!streamMsgId) {
@@ -181,6 +199,12 @@ export function useInspector() {
       if (m) {
         m.text += piece;
         lastAssistantText = m.text;
+      } else {
+        // Bubble was collapsed/removed — start a fresh fragment.
+        const id = msgId();
+        streamMsgId = id;
+        messages.value.push({ id, role: "assistant", text: piece, ts: nowISO() });
+        lastAssistantText = piece;
       }
     }
   }
@@ -227,7 +251,9 @@ export function useInspector() {
         });
       }
       // Stream bubble updates use the same delta stream.
-      if (text) {
+      // Drop fragments that arrive after the turn's final was applied —
+      // they must not reopen or append to a closed answer.
+      if (text && !turnStreamClosed) {
         streamPending += text;
         scheduleStreamFlush();
       }
@@ -238,8 +264,10 @@ export function useInspector() {
     if (events.value.length > 300) events.value.splice(0, events.value.length - 300);
 
     if (evt.type === "llm.request_finished" || evt.type === "llm.request_failed") {
+      // Flush what we have, but keep streamMsgId: the eventHub may still
+      // deliver a coalesced delta batch that was in flight. Cleared only
+      // when the turn final is applied or a new user message starts.
       flushStreamDelta();
-      streamMsgId = null;
     }
 
     if (evt.type === "agent.state_changed") {
@@ -346,6 +374,7 @@ export function useInspector() {
     // New turn: reset stream buffers so the next answer gets a fresh bubble.
     streamMsgId = null;
     streamPending = "";
+    turnStreamClosed = false;
     if (streamFlush != null) {
       window.clearTimeout(streamFlush);
       streamFlush = null;
@@ -387,6 +416,7 @@ export function useInspector() {
     lastErrorShown.value = "";
     streamMsgId = null;
     streamPending = "";
+    turnStreamClosed = false;
     lastAssistantText = "";
     lastFinalTurnId = -1;
     const data = await apiSessionLoad(id);
