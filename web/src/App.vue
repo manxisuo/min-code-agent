@@ -48,31 +48,48 @@ const meta = computed(() => {
   return `${s.session_id} · ${s.provider}/${s.model} · ${s.workspace}`;
 });
 const themeLabel = computed(() => (theme.value === "dark" ? "Light" : "Dark"));
-const exportNote = ref("");
 const exportBusy = ref(false);
+const toast = ref<{ text: string; kind: "ok" | "err" | "info" } | null>(null);
+let toastTimer: number | null = null;
+
+function showToast(text: string, kind: "ok" | "err" | "info" = "ok") {
+  toast.value = { text, kind };
+  if (toastTimer != null) window.clearTimeout(toastTimer);
+  toastTimer = window.setTimeout(() => {
+    toast.value = null;
+    toastTimer = null;
+  }, 4500);
+}
 
 async function exportMarkdown(download: boolean) {
   if (download) {
-    window.open("/api/export/download", "_blank");
+    try {
+      window.open("/api/export/download", "_blank");
+      showToast("已开始下载 Markdown", "ok");
+    } catch (e) {
+      showToast(String((e as Error).message || e), "err");
+    }
     return;
   }
   exportBusy.value = true;
-  exportNote.value = "";
   try {
     const res = await fetch("/api/export", { method: "POST" });
     const data = (await res.json().catch(() => ({}))) as {
       ok?: boolean;
       rel?: string;
       path?: string;
+      bytes?: number;
       error?: string;
     };
     if (!res.ok || !data.ok) {
-      exportNote.value = data.error || res.statusText;
+      showToast(data.error || res.statusText || "export failed", "err");
       return;
     }
-    exportNote.value = `已导出 ${data.rel || data.path}`;
+    const target = data.rel || data.path || "";
+    const n = data.bytes != null ? ` · ${data.bytes}B` : "";
+    showToast(`导出成功：${target}${n}`, "ok");
   } catch (e) {
-    exportNote.value = String((e as Error).message || e);
+    showToast(String((e as Error).message || e), "err");
   } finally {
     exportBusy.value = false;
   }
@@ -95,12 +112,21 @@ async function onSwitchSession(id: string) {
 <template>
   <div class="app-shell">
     <PermissionBar />
+    <div
+      v-if="toast"
+      class="toast"
+      :data-kind="toast.kind"
+      role="status"
+      aria-live="polite"
+    >
+      {{ toast.text }}
+    </div>
     <header class="top">
       <div class="brand">
         <span class="logo">MC</span>
         <div>
           <strong>MinCode Inspector</strong>
-          <div class="meta">{{ exportNote || meta }}</div>
+          <div class="meta">{{ meta }}</div>
         </div>
       </div>
       <div class="top-right">
