@@ -10,10 +10,12 @@ import (
 
 // Recorder appends events to a JSONL file, one event per line.
 type Recorder struct {
-	mu   sync.Mutex
-	file *os.File
-	w    *bufio.Writer
-	path string
+	mu        sync.Mutex
+	file      *os.File
+	w         *bufio.Writer
+	path      string
+	unsynced  int
+	syncEvery int
 }
 
 // NewRecorder opens (or creates) a JSONL trace file.
@@ -26,9 +28,10 @@ func NewRecorder(path string) (*Recorder, error) {
 		return nil, fmt.Errorf("open trace file: %w", err)
 	}
 	return &Recorder{
-		file: f,
-		w:    bufio.NewWriter(f),
-		path: path,
+		file:      f,
+		w:         bufio.NewWriterSize(f, 32*1024),
+		path:      path,
+		syncEvery: 32,
 	}, nil
 }
 
@@ -37,7 +40,9 @@ func (r *Recorder) Path() string {
 	return r.path
 }
 
-// Record writes one event as a JSON line and flushes.
+// Record writes one event as a JSON line. The buffer is flushed so readers
+// can see recent lines; fsync is batched to avoid blocking the agent loop
+// on every stream delta.
 func (r *Recorder) Record(e Event) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -55,7 +60,16 @@ func (r *Recorder) Record(e Event) error {
 	if err := r.w.Flush(); err != nil {
 		return fmt.Errorf("flush trace: %w", err)
 	}
-	return r.file.Sync()
+	r.unsynced++
+	every := r.syncEvery
+	if every <= 0 {
+		every = 32
+	}
+	if r.unsynced >= every {
+		_ = r.file.Sync()
+		r.unsynced = 0
+	}
+	return nil
 }
 
 // Close flushes and closes the file.
@@ -68,6 +82,7 @@ func (r *Recorder) Close() error {
 		}
 	}
 	if r.file != nil {
+		_ = r.file.Sync()
 		return r.file.Close()
 	}
 	return nil

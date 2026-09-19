@@ -98,6 +98,11 @@ export function useInspector() {
   let lastFinalTurnId = -1;
   /** Text of the last assistant bubble written for final/stream sync. */
   let lastAssistantText = "";
+  /** Coalesce SSE event handling to avoid freezing the UI. */
+  let sseQueue: RuntimeEvent[] = [];
+  let sseTimer: number | null = null;
+  let sessionRefreshAt = 0;
+  let metricsRefreshAt = 0;
 
   function nowISO(): string {
     return new Date().toISOString();
@@ -248,10 +253,12 @@ export function useInspector() {
         flushStreamDelta();
         clearPollTimer();
       }
+      void refreshSessionThrottled();
+      void refreshMetricsThrottled();
     }
     if (evt.type === "llm.request_finished" || evt.type === "context.built") {
-      void refreshSession();
-      void refreshMetrics();
+      void refreshSessionThrottled();
+      void refreshMetricsThrottled();
     }
     if (evt.type === "tool.batch_started") {
       const tools = evt.data?.tools;
@@ -278,6 +285,40 @@ export function useInspector() {
     }
   }
 
+  function refreshSessionThrottled() {
+    const now = Date.now();
+    if (now - sessionRefreshAt < 800) return;
+    sessionRefreshAt = now;
+    void refreshSession();
+  }
+
+  function refreshMetricsThrottled() {
+    const now = Date.now();
+    if (now - metricsRefreshAt < 800) return;
+    metricsRefreshAt = now;
+    void refreshMetrics();
+  }
+
+  function flushSseQueue() {
+    sseTimer = null;
+    const batch = sseQueue;
+    sseQueue = [];
+    for (const evt of batch) {
+      pushEvent(evt);
+    }
+  }
+
+  function enqueueSse(evt: RuntimeEvent) {
+    sseQueue.push(evt);
+    // Keep queue bounded if the tab is backgrounded.
+    if (sseQueue.length > 200) {
+      sseQueue = sseQueue.slice(-200);
+    }
+    if (sseTimer == null) {
+      sseTimer = window.setTimeout(flushSseQueue, 80);
+    }
+  }
+
   function connectSSE() {
     if (es) es.close();
     es = new EventSource("/api/events");
@@ -287,7 +328,7 @@ export function useInspector() {
     });
     es.addEventListener("runtime", (ev) => {
       try {
-        pushEvent(JSON.parse((ev as MessageEvent).data) as RuntimeEvent);
+        enqueueSse(JSON.parse((ev as MessageEvent).data) as RuntimeEvent);
       } catch {
         /* skip malformed */
       }
@@ -327,8 +368,8 @@ export function useInspector() {
     };
     clearPollTimer();
     pollTimer = window.setInterval(() => {
-      void refreshSession();
-    }, 400);
+      void refreshSessionThrottled();
+    }, 600);
   }
 
   async function cancel() {
@@ -379,8 +420,8 @@ export function useInspector() {
     void refreshSession().catch(() => addMessage("system", "无法连接 API — 请先运行 mincode web"));
     void refreshMetrics();
     refreshTimer = window.setInterval(() => {
-      void refreshSession();
-      void refreshMetrics();
+      void refreshSessionThrottled();
+      void refreshMetricsThrottled();
     }, 3000);
   }
 

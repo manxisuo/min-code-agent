@@ -76,7 +76,7 @@ function diffHtml(diff: string): string {
 let poll: number | null = null;
 onMounted(() => {
   void refresh();
-  poll = window.setInterval(() => void refresh(), 800);
+  poll = window.setInterval(() => void refresh(), 1500);
 });
 onBeforeUnmount(() => {
   if (poll != null) window.clearInterval(poll);

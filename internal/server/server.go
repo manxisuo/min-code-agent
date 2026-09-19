@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,22 +56,17 @@ type Server struct {
 
 	hub *eventHub
 
-	mu          sync.Mutex
-	running     bool
-	cancelTurn  context.CancelFunc
-	lastResult  *agent.Result
-	lastErr     string
-	turnStarted time.Time
-	// turnSeq increments on each /api/chat; completedTurn is the turn
-	// whose result is in lastResult. Prevents stale finals from being
-	// re-served as the "current" answer while a new turn runs.
+	mu            sync.Mutex
+	running       bool
+	cancelTurn    context.CancelFunc
+	lastResult    *agent.Result
+	lastErr       string
+	turnStarted   time.Time
 	turnSeq       int
 	completedTurn int
 }
 
-// New wires an agent + bus into an HTTP server. Subscribe on the bus so all
-// runtime events fan out to SSE clients without touching the agent loop.
-// exp and skills may be nil when those APIs should report empty lists.
+// New wires an agent + bus into an HTTP server.
 func New(opts Options, ag *agent.Agent, bus *observability.Bus, metrics *observability.MetricsCollector, exp *experiment.Store, skills *skill.Loader, ws *tools.Workspace, instr *instruction.Loader) *Server {
 	if opts.Addr == "" {
 		opts.Addr = "127.0.0.1:8080"
@@ -203,7 +199,6 @@ func (s *Server) handleSession(w http.ResponseWriter, _ *http.Request) {
 
 	var final string
 	var steps, toolCalls int
-	// Only expose the last answer when no turn is in flight.
 	if !running && lastResult != nil {
 		final = lastResult.Final
 		steps = lastResult.Steps
@@ -243,7 +238,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "invalid json body")
 		return
 	}
-	msg := req.Message
+	msg := strings.TrimSpace(req.Message)
 	if msg == "" {
 		writeErr(w, http.StatusBadRequest, "message is required")
 		return
@@ -255,7 +250,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, "a turn is already running")
 		return
 	}
-	// Detach from the HTTP request: the turn continues after the response.
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancelTurn = cancel
 	s.running = true
@@ -263,7 +257,6 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	s.turnStarted = time.Now().UTC()
 	s.turnSeq++
 	turn := s.turnSeq
-	// Drop previous final so clients polling mid-turn do not re-append it.
 	s.lastResult = nil
 	s.mu.Unlock()
 
@@ -318,7 +311,6 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	ch := s.hub.subscribe()
 	defer s.hub.unsubscribe(ch)
 
-	// Hello event so the client knows the stream is live.
 	fmt.Fprintf(w, "event: hello\ndata: %s\n\n", mustJSON(map[string]any{
 		"session_id": s.opts.SessionID,
 		"time":       time.Now().UTC(),
@@ -326,7 +318,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 
 	ctx := r.Context()
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -359,10 +351,11 @@ func (s *Server) handleContext(w http.ResponseWriter, _ *http.Request) {
 	res := s.lastResult
 	s.mu.Unlock()
 	if res == nil || res.Snapshot == nil {
-		// Fall back to agent's last snapshot if any.
-		if snap := s.agent.Ctx.LastSnapshot(); snap != nil {
-			writeJSON(w, http.StatusOK, snap)
-			return
+		if s.agent != nil && s.agent.Ctx != nil {
+			if snap := s.agent.Ctx.LastSnapshot(); snap != nil {
+				writeJSON(w, http.StatusOK, snap)
+				return
+			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "total_tokens": 0})
 		return
@@ -390,7 +383,6 @@ func (s *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleTimeline returns a recent in-memory buffer of runtime events.
 func (s *Server) handleTimeline(w http.ResponseWriter, _ *http.Request) {
 	events := s.hub.recent(200)
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
@@ -402,64 +394,4 @@ func mustJSON(v any) string {
 		return `{"error":"marshal"}`
 	}
 	return string(b)
-}
-
-// eventHub fans bus events out to SSE subscribers and keeps a short buffer.
-type eventHub struct {
-	mu      sync.Mutex
-	subs    map[chan observability.Event]struct{}
-	buf     []observability.Event
-	maxKeep int
-}
-
-func newEventHub() *eventHub {
-	return &eventHub{
-		subs:    make(map[chan observability.Event]struct{}),
-		maxKeep: 200,
-	}
-}
-
-func (h *eventHub) publish(e observability.Event) {
-	h.mu.Lock()
-	h.buf = append(h.buf, e)
-	if len(h.buf) > h.maxKeep {
-		h.buf = h.buf[len(h.buf)-h.maxKeep:]
-	}
-	for ch := range h.subs {
-		select {
-		case ch <- e:
-		default:
-			// Slow client: drop event rather than block the agent.
-		}
-	}
-	h.mu.Unlock()
-}
-
-func (h *eventHub) subscribe() chan observability.Event {
-	ch := make(chan observability.Event, 64)
-	h.mu.Lock()
-	h.subs[ch] = struct{}{}
-	h.mu.Unlock()
-	return ch
-}
-
-func (h *eventHub) unsubscribe(ch chan observability.Event) {
-	h.mu.Lock()
-	if _, ok := h.subs[ch]; ok {
-		delete(h.subs, ch)
-		close(ch)
-	}
-	h.mu.Unlock()
-}
-
-func (h *eventHub) recent(n int) []observability.Event {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	out := h.buf
-	if n > 0 && len(out) > n {
-		out = out[len(out)-n:]
-	}
-	cp := make([]observability.Event, len(out))
-	copy(cp, out)
-	return cp
 }
