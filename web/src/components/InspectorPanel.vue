@@ -33,7 +33,11 @@ type ItemRow = {
   index: number;
   source: string;
   role?: string;
+  /** Collapsed one-line preview shown by default. */
   preview: string;
+  /** Full preview content from the snapshot (may be multi-line). */
+  fullPreview: string;
+  hasMore: boolean;
   tok: number;
   included: boolean;
   excluded: boolean;
@@ -55,6 +59,8 @@ type RunRow = {
 };
 
 const expanded = ref<Set<string>>(new Set());
+/** Keys of individual context items whose full preview is open. */
+const expandedItems = ref<Set<string>>(new Set());
 
 function truncatePreview(s: string, n = 72): string {
   const t = (s || "").replace(/\s+/g, " ").trim();
@@ -63,11 +69,16 @@ function truncatePreview(s: string, n = 72): string {
 }
 
 function toItemRow(i: ContextItem, index: number): ItemRow {
+  const fullPreview = i.preview || "";
+  const collapsed = truncatePreview(fullPreview);
+  const flat = fullPreview.replace(/\s+/g, " ").trim();
   return {
     index,
     source: i.source || "unknown",
     role: i.role,
-    preview: truncatePreview(i.preview || ""),
+    preview: collapsed,
+    fullPreview,
+    hasMore: flat.length > 72 || fullPreview.includes("\n"),
     tok: i.token_count || 0,
     included: !!i.included,
     excluded: !!i.excluded,
@@ -118,14 +129,43 @@ function toggleRun(id: string) {
   if (next.has(id)) next.delete(id);
   else next.add(id);
   expanded.value = next;
+  if (!next.has(id)) {
+    // Collapse child item previews when the run itself collapses.
+    const items = new Set(expandedItems.value);
+    let changed = false;
+    for (const key of items) {
+      if (key.startsWith(id + ":")) {
+        items.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) expandedItems.value = items;
+  }
 }
 
 function toggleAll() {
   if (expanded.value.size > 0) {
     expanded.value = new Set();
+    expandedItems.value = new Set();
     return;
   }
   expanded.value = new Set(ctxRuns.value.map((r) => r.id));
+}
+
+function itemKey(runId: string, index: number): string {
+  return `${runId}:${index}`;
+}
+
+function isItemOpen(runId: string, index: number): boolean {
+  return expandedItems.value.has(itemKey(runId, index));
+}
+
+function toggleItem(runId: string, index: number) {
+  const key = itemKey(runId, index);
+  const next = new Set(expandedItems.value);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  expandedItems.value = next;
 }
 
 const ctxTotal = computed(() => {
@@ -419,7 +459,17 @@ function rawJson(e: RuntimeEvent) {
               v-for="item in run.items"
               :key="run.id + '-' + item.index"
               class="ctx-detail-row"
-              :class="{ excluded: item.excluded, truncated: item.truncated }"
+              :class="{
+                excluded: item.excluded,
+                truncated: item.truncated,
+                open: isItemOpen(run.id, item.index),
+              }"
+              :role="item.hasMore ? 'button' : undefined"
+              :tabindex="item.hasMore ? 0 : undefined"
+              :title="item.hasMore && !isItemOpen(run.id, item.index) ? '点击展开 preview 全文' : undefined"
+              @click="item.hasMore && toggleItem(run.id, item.index)"
+              @keydown.enter.prevent="item.hasMore && toggleItem(run.id, item.index)"
+              @keydown.space.prevent="item.hasMore && toggleItem(run.id, item.index)"
             >
               <div class="d-tok">{{ item.tok }}</div>
               <div class="d-meta">
@@ -431,7 +481,20 @@ function rawJson(e: RuntimeEvent) {
                 <span v-if="item.pinned" class="tag">pinned</span>
                 <span v-if="item.reason" class="reason">{{ item.reason }}</span>
               </div>
-              <div class="d-preview" :title="item.preview">{{ item.preview }}</div>
+              <div
+                class="d-preview"
+                :class="{ expandable: item.hasMore }"
+                :title="item.hasMore && !isItemOpen(run.id, item.index) ? item.fullPreview : undefined"
+              >
+                <template v-if="isItemOpen(run.id, item.index)">
+                  <pre class="d-full">{{ item.fullPreview || "—" }}</pre>
+                  <span class="d-collapse-hint">点击收起</span>
+                </template>
+                <template v-else>
+                  <span>{{ item.preview }}</span>
+                  <span v-if="item.hasMore" class="d-more">… 展开</span>
+                </template>
+              </div>
             </div>
           </div>
         </template>

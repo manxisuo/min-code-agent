@@ -425,6 +425,15 @@ button.linkish:hover:not(:disabled) {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 4px;
+}
+.ctx-detail-row[role="button"] {
+  cursor: pointer;
+}
+.ctx-detail-row[role="button"]:hover,
+.ctx-detail-row.open {
+  background: var(--panel-2);
 }
 .ctx-detail-row .d-tok { text-align: right; color: var(--ink); }
 .ctx-detail-row .d-meta {
@@ -452,6 +461,28 @@ button.linkish:hover:not(:disabled) {
   word-break: break-all;
   color: var(--muted);
   line-height: 1.35;
+  min-width: 0;
+}
+.ctx-detail-row .d-preview.expandable {
+  color: var(--ink);
+}
+.ctx-detail-row .d-preview .d-more,
+.ctx-detail-row .d-preview .d-collapse-hint {
+  margin-left: 6px;
+  color: var(--accent);
+  font-size: 10px;
+  white-space: nowrap;
+  word-break: normal;
+}
+.ctx-detail-row .d-preview .d-full {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--ink);
+  background: transparent;
+  max-height: 240px;
+  overflow: auto;
 }
 .ctx-detail-row.excluded .d-preview { opacity: 0.55; }
 .ctx-total {

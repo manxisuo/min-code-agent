@@ -22,6 +22,26 @@ func TestEstimateTokens(t *testing.T) {
 	}
 }
 
+func TestPreviewOfPreservesMultilineAndCaps(t *testing.T) {
+	if got := previewOf("  \n "); got != "" {
+		t.Fatalf("blank = %q", got)
+	}
+
+	multi := "line one\nline two\nline three"
+	if got := previewOf(multi); got != multi {
+		t.Fatalf("multiline = %q, want full content preserved", got)
+	}
+
+	long := strings.Repeat("x", previewMaxRunes+50)
+	got := previewOf(long)
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("long preview missing ellipsis: len=%d", len(got))
+	}
+	if n := len([]rune(got)); n != previewMaxRunes+1 {
+		t.Fatalf("long preview runes = %d, want %d", n, previewMaxRunes+1)
+	}
+}
+
 func TestBuildRequestIncludesSystemAndUser(t *testing.T) {
 	m := New("SYS", "", 10000)
 	m.AppendUser("hi there")

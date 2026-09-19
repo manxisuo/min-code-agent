@@ -1459,6 +1459,9 @@ func formatSnapshot(s ctxmgr.Snapshot) string {
 		if preview == "" {
 			preview = "-"
 		}
+		// Flatten newlines so multi-line context previews stay one row in CLI.
+		preview = strings.ReplaceAll(preview, "\r\n", " ")
+		preview = strings.ReplaceAll(preview, "\n", " ")
 		b.WriteString("             " + dim(truncateStr(preview, 56)) + "\n")
 	}
 	b.WriteString(gray(strings.Repeat("─", 64)) + "\n")

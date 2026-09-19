@@ -444,17 +444,22 @@ func (m *Manager) truncateToTokens(s string, maxTok int) string {
 	return truncateToTokensScaled(s, maxTok, m.est)
 }
 
+// previewMaxRunes caps stored context-item previews so snapshots stay bounded
+// while still allowing the inspector to expand a useful amount of content.
+const previewMaxRunes = 2000
+
+// previewOf returns a bounded multi-line preview of message content.
+// Newlines are preserved so the web inspector can expand the full preview.
 func previewOf(s string) string {
 	s = trimSpace(s)
 	if s == "" {
 		return ""
 	}
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			return s[:i]
-		}
+	runes := []rune(s)
+	if len(runes) <= previewMaxRunes {
+		return s
 	}
-	return s
+	return string(runes[:previewMaxRunes]) + "…"
 }
 
 func truncateToTokensScaled(s string, maxTok int, est func(string) int) string {
