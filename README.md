@@ -101,6 +101,7 @@ Experiment Framework（run / list / show / compare，含 min/median/avg/max）
 ```bash
 # 配置
 cp mincode.example.yaml mincode.yaml
+
 # 编辑 model / base_url；API Key 用环境变量
 export OPENAI_API_KEY=sk-...
 # 或 MINCODE_API_KEY / MINCODE_BASE_URL / MINCODE_MODEL
@@ -109,6 +110,7 @@ export OPENAI_API_KEY=sk-...
 cd web && npm install && npm run build && cd ..
 
 go build -o mincode ./cmd/mincode
+
 ./mincode ./my-project
 ```
 
